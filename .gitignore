@@ -1,0 +1,6 @@
+# OS junk
+.DS_Store
+
+# Dependencies & builds (added when the app scaffold lands)
+node_modules/
+dist/
