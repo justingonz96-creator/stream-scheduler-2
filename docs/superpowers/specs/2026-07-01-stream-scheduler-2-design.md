@@ -31,6 +31,12 @@ simpler engine.
 **In (feature parity with 1.x — no new features in v1):**
 - Schedule a video: native file picker (network drives fine), title, date + 5-minute-step
   time picker, slate lead-in (0–30 min), auto-stop toggle, weekly repeat.
+- **Approved v1 UI refinement — "spotlight step 1":** in the schedule form, step 1 (choose
+  the video) is the visual anchor: enlarged heading and a tall, prominent pick area, with
+  steps 2–4 slightly dimmed until a video is chosen; once picked, step 1 collapses to a
+  compact "✓ filename (length)" row and emphasis flows to date & time. (Fixes a 1.x problem
+  Justin flagged: the calendar/time controls visually dominated the form and drew the eye
+  past step 1.)
 - Content-portal class link per event (required): resolves the studio (control station), RTMP
   ingest + stream key, and orientation automatically. "Check this class link" preview.
 - Broadcast: slate picture + **looping MP3 music** for the lead-in → timed crossfade (audio and
