@@ -64,70 +64,69 @@ function createScheduler({ store, portal, engineFactory, settings, now = () => D
     } catch (e) { log('portal end error: ' + (e && e.message)); }
   }
 
+  // The engine's failure reason can embed ffmpeg stderr, which on a connection
+  // error prints the full output URL — INCLUDING the stream key. Scrub it before
+  // anything reaches a log line or the persisted outcome (key-secrecy law).
+  function redactSecrets(text, target) {
+    let s = String(text == null ? '' : text);
+    if (target) {
+      if (target.server && target.key) { const u = joinRtmpUrl(target.server, target.key); if (u) s = s.split(u).join('***'); }
+      if (target.key) s = s.split(target.key).join('***');
+    }
+    return s;
+  }
+
   function spawn(ev, { leadSec, resumeOffsetSec, target, retried, resumeCount }) {
     const s = settings.get();
     const useSlate = leadSec > 0;
     const bc = engineFactory({
-      videoPath: ev.filePath,
-      vertical: !!target.vertical,
-      bitrateKbps: s.videoBitrate,
-      fps: 30,
-      leadSec,
-      fadeSec: (s.fadeMs || 0) / 1000,
-      slateImage: useSlate ? s.slateImage : '',
-      slateMusic: useSlate ? s.slateMusic : '',
-      resumeOffsetSec,
-      outUrl: joinRtmpUrl(target.server, target.key),
+      videoPath: ev.filePath, vertical: !!target.vertical, bitrateKbps: s.videoBitrate, fps: 30,
+      leadSec, fadeSec: (s.fadeMs || 0) / 1000,
+      slateImage: useSlate ? s.slateImage : '', slateMusic: useSlate ? s.slateMusic : '',
+      resumeOffsetSec, outUrl: joinRtmpUrl(target.server, target.key),
     });
     active = { eventId: ev.id, broadcast: bc, target, sawPlaying: false, retried, resumeCount };
-    bc.on('playing', () => onPlaying(ev.id));
-    bc.on('ended', () => { onEnded(ev.id); });
-    bc.on('failed', (info) => { onFailed(ev.id, (info && info.reason) || 'unknown'); });
+    bc.on('playing', () => { try { onPlaying(ev.id, bc); } catch (e) { log('playing handler error: ' + ((e && e.message) || e)); } });
+    bc.on('ended', () => { onEnded(ev.id, bc).catch((e) => log('ended handler error: ' + ((e && e.message) || e))); });
+    bc.on('failed', (info) => { onFailed(ev.id, (info && info.reason) || 'unknown', bc).catch((e) => log('failed handler error: ' + ((e && e.message) || e))); });
     try { bc.start(); }
-    catch (e) { onFailed(ev.id, (e && e.message) || 'the video engine could not start'); }
+    catch (e) { onFailed(ev.id, (e && e.message) || 'the video engine could not start', bc).catch(() => {}); }
   }
 
-  function onPlaying(id) {
-    if (!active || active.eventId !== id) return;
+  function onPlaying(id, bc) {
+    if (!active || active.eventId !== id || active.broadcast !== bc) return;
     active.sawPlaying = true;
     const ev = byId(id); if (!ev) return;
     ev.status = now() >= ev.fireAt ? 'playing' : 'preshow';
     persist();
   }
 
-  async function onEnded(id) {
-    if (!active || active.eventId !== id) return;
-    const ev = byId(id); const target = active.target; active = null;
+  async function onEnded(id, bc) {
+    if (!active || active.eventId !== id || active.broadcast !== bc) return;
+    const ev = byId(id); active = null;
     if (!ev) return;
     if (ev.autoStop) { await endPortal(ev); ev.outcome = 'Played ✓ and the stream ended'; }
     else { ev.outcome = 'Played ✓ — video finished (portal broadcast left open, as requested)'; }
     ev.status = 'done'; ev.doneAt = now();
     renew(ev); persist();
-    void target;
   }
 
-  async function onFailed(id, reason) {
-    if (!active || active.eventId !== id) return;
+  async function onFailed(id, reason, bc) {
+    if (!active || active.eventId !== id || active.broadcast !== bc) return;
     const ev = byId(id); if (!ev) { active = null; return; }
     const { sawPlaying, retried, resumeCount, target, broadcast } = active;
-
+    const safeReason = redactSecrets(reason, target);
     if (!sawPlaying) {
-      // never went live → retry exactly once
       active = null;
       if (!retried) {
-        log('start failed, retrying once: ' + reason);
+        log('start failed, retrying once: ' + safeReason);
         spawn(ev, { leadSec: computeLeadSec(ev, now()), resumeOffsetSec: 0, target, retried: true, resumeCount });
-      } else {
-        fail(ev, reason);
-      }
+      } else { fail(ev, safeReason); }
       return;
     }
-
-    // was live → resume at offset, unless we're basically done or out of tries
     const offset = typeof broadcast.videoOffsetSec === 'function' ? broadcast.videoOffsetSec() : 0;
     active = null;
     if (now() >= plannedVideoEndAtMs(ev) - 1500) {
-      // effectively finished — treat as a clean play
       if (ev.autoStop) { await endPortal(ev); ev.outcome = 'Played ✓ and the stream ended'; }
       else { ev.outcome = 'Played ✓ — video finished (portal broadcast left open, as requested)'; }
       ev.status = 'done'; ev.doneAt = now(); renew(ev); persist();
@@ -144,21 +143,22 @@ function createScheduler({ store, portal, engineFactory, settings, now = () => D
   }
 
   async function takeover(prev) {
+    const bc = active && active.broadcast;
+    active = null;                                 // unlink FIRST — a late event from the outgoing engine can't resume-spawn
     prev.status = 'done';
     prev.outcome = 'Ended early — the next scheduled video started';
     prev.doneAt = now();
-    const bc = active && active.broadcast;
-    if (prev.autoStop) await endPortal(prev);
-    active = null;
+    if (prev.autoStop) await endPortal(prev);      // end-portal-before-stop
     try { if (bc) bc.stop(); } catch {}
-    renew(prev);
-    persist();
+    renew(prev); persist();
   }
 
   async function goLive(ev) {
     ev.status = 'starting'; persist();
     log('starting broadcast: ' + (ev.title || ev.fileName || ev.id));
-    const target = await portal.streamTarget({ contentItemGuid: ev.contentItemGuid, scheduleGuid: ev.scheduleGuid });
+    let target;
+    try { target = await portal.streamTarget({ contentItemGuid: ev.contentItemGuid, scheduleGuid: ev.scheduleGuid }); }
+    catch (e) { fail(ev, 'the studio could not be reached: ' + ((e && e.message) || e)); return; }
     if (!target || !target.ok) { fail(ev, (target && target.error) || 'no studio was returned by the portal'); return; }
     spawn(ev, { leadSec: computeLeadSec(ev, now()), resumeOffsetSec: 0, target, retried: false, resumeCount: 0 });
   }

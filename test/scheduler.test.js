@@ -7,8 +7,8 @@ const { normalizeEvent } = require('../schedule/model');
 
 // ---- fakes ----
 function memStore(initial = []) {
-  let data = initial.map((e) => ({ ...e }));
-  return { load: () => data.map((e) => ({ ...e })), save: (evs) => { data = evs.map((e) => ({ ...e })); }, _last: () => data };
+  let data = initial.map((e) => ({ ...e })); let willFail = false;
+  return { load: () => data.map((e) => ({ ...e })), save: (evs) => { if (willFail) throw new Error('disk full'); data = evs.map((e) => ({ ...e })); }, _fail: () => { willFail = true; } };
 }
 function fakeEngine(offset = 5) {
   const e = new EventEmitter();
@@ -34,11 +34,13 @@ function harness({ events = [], target = { ok: true, server: 'rtmps://h/app', ke
   const settings = { get: () => ({ slateImage: 'slate.png', slateMusic: 'm.mp3', fadeMs: 1000, videoBitrate: 6000 }) };
   let clock = 0;
   let idc = 0;
+  const store = memStore(events);
+  const logs = [];
   const sched = createScheduler({
-    store: memStore(events), portal, engineFactory, settings,
-    now: () => clock, genId: () => 'gen' + (idc++), log: () => {},
+    store, portal, engineFactory, settings,
+    now: () => clock, genId: () => 'gen' + (idc++), log: (m) => logs.push(m),
   });
-  return { sched, spawned, ended, order, setClock: (t) => { clock = t; }, getClock: () => clock };
+  return { sched, spawned, ended, order, logs, setClock: (t) => { clock = t; }, getClock: () => clock, failSave: () => store._fail() };
 }
 const liveEvent = (over = {}) => normalizeEvent(Object.assign({
   id: 'e1', filePath: '/v.mp4', durationSec: 600, contentItemGuid: 'ci', scheduleGuid: 'sg',
@@ -212,4 +214,58 @@ test('addEvent normalizes + persists; removeEvent refuses the live event', async
   const r = h.sched.removeEvent(ev.id);
   assert.equal(r.ok, false);
   assert.match(r.error, /Stop the live broadcast/i);
+});
+
+test('instance guard: a late "playing" from a dead engine does not flip status', async () => {
+  const h = harness({ events: [liveEvent()] });
+  h.setClock(70000); await h.sched.tick();
+  h.spawned[0].emit('failed', { reason: 'start fail' });      // retry → spawned[1]
+  await new Promise((r) => setImmediate(r));
+  assert.equal(h.spawned.length, 2);
+  h.spawned[0].emit('playing');                                // dead instance emits late
+  assert.equal(h.sched.getEvents()[0].status, 'starting', 'dead engine playing must be ignored');
+});
+
+test('takeover: a late failure from the outgoing engine cannot orphan a resume engine', async () => {
+  const a = liveEvent({ id: 'A', fireAt: 100000, leadMs: 30000 });
+  const b = liveEvent({ id: 'B', fireAt: 160000, leadMs: 0, contentItemGuid: 'ci2', scheduleGuid: 'sg2' });
+  const h = harness({ events: [a, b] });
+  h.setClock(70000); await h.sched.tick();
+  h.spawned[0].emit('playing');
+  h.setClock(160000); await h.sched.tick();                   // takeover A, go live B
+  await new Promise((r) => setImmediate(r));
+  const n = h.spawned.length;
+  h.spawned[0].emit('failed', { reason: 'late drop' });       // A's dead engine fires late
+  await new Promise((r) => setImmediate(r));
+  assert.equal(h.spawned.length, n, 'a late failure from the taken-over engine must spawn nothing');
+  assert.equal(h.sched.getEvents().find((e) => e.id === 'A').status, 'done');
+});
+
+test('key redaction: a stream key in a failure reason never reaches outcome or logs', async () => {
+  const h = harness({ events: [liveEvent()] });      // target.key === 'KEY', server 'rtmps://h/app'
+  h.setClock(70000); await h.sched.tick();
+  h.spawned[0].emit('failed', { reason: 'rtmps://h/app/KEY: Input/output error' });
+  await new Promise((r) => setImmediate(r));          // retry
+  h.spawned[1].emit('failed', { reason: 'rtmps://h/app/KEY: Input/output error' });
+  await new Promise((r) => setImmediate(r));          // fail
+  const ev = h.sched.getEvents()[0];
+  assert.equal(ev.status, 'failed');
+  assert.ok(!ev.outcome.includes('KEY'), 'key must not be in the persisted outcome');
+  assert.ok(!h.logs.join('\n').includes('KEY'), 'key must not be in logs');
+});
+
+test('a store.save failure inside the async ended handler does not throw or reject unhandled', async () => {
+  const h = harness({ events: [liveEvent()] });
+  h.setClock(70000); await h.sched.tick();
+  h.spawned[0].emit('playing');
+  h.failSave();
+  assert.doesNotThrow(() => h.spawned[0].emit('ended'));
+  await new Promise((r) => setImmediate(r));           // rejection, if any, is swallowed by the handler's .catch
+});
+
+test('a store.save failure inside the sync playing handler does not throw', async () => {
+  const h = harness({ events: [liveEvent()] });
+  h.setClock(70000); await h.sched.tick();
+  h.failSave();
+  assert.doesNotThrow(() => h.spawned[0].emit('playing'));
 });
