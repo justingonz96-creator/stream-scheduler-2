@@ -58,7 +58,8 @@
           "from": "resources/ffmpeg/mac-x64",
           "to": "ffmpeg/mac-x64"
         }
-      ]
+      ],
+      "x64ArchFiles": "Contents/Resources/ffmpeg/**"
     },
     "dmg": {
       "writeUpdateInfo": false

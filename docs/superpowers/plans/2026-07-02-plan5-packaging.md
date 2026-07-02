@@ -271,6 +271,7 @@ Run: `npm install --save-dev electron-builder` (devDependency only; verify `depe
   "mac": {
     "target": [{ "target": "dmg", "arch": ["universal"] }, { "target": "zip", "arch": ["universal"] }],
     "category": "public.app-category.video",
+    "x64ArchFiles": "Contents/Resources/ffmpeg/**",
     "extraResources": [
       { "from": "resources/ffmpeg/mac-arm64", "to": "ffmpeg/mac-arm64" },
       { "from": "resources/ffmpeg/mac-x64", "to": "ffmpeg/mac-x64" }
@@ -284,7 +285,7 @@ Run: `npm install --save-dev electron-builder` (devDependency only; verify `depe
   "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true, "perMachine": false }
 }
 ```
-Notes: NO `mergeASARs`-breaking native deps exist (zero runtime deps), so the universal merge is safe; both mac arch dirs ship so `process.arch` picks at runtime (Task 1 resolver). No signing config (unsigned by decision). No `publish` block (releases are uploaded manually with user consent).
+Notes: `x64ArchFiles` declares the bundled ffmpeg dirs as intentionally single-arch (both arch dirs ship in both slices; the universal merge otherwise refuses identical Mach-O files). NO `mergeASARs`-breaking native deps exist (zero runtime deps), so the universal merge is safe; both mac arch dirs ship so `process.arch` picks at runtime (Task 1 resolver). No signing config (unsigned by decision). No `publish` block (releases are uploaded manually with user consent).
 
 - [ ] **Step 3: Verify + commit** (build runs in Task 6, by the controller)
 
