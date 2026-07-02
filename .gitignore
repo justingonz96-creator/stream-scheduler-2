@@ -10,3 +10,7 @@ dist/
 resources/ffmpeg/
 test/fixtures/
 test/tmp/
+
+# mediamtx test-run TLS junk (generated in cwd by the rehearsal receiver)
+auto.crt
+auto.key
