@@ -78,10 +78,11 @@ function createScheduler({ store, portal, engineFactory, settings, now = () => D
 
   function spawn(ev, { leadSec, resumeOffsetSec, target, retried, resumeCount }) {
     const s = settings.get();
-    const useSlate = leadSec > 0;
+    const useSlate = leadSec > 0 && !!s.slateImage;
     const bc = engineFactory({
       videoPath: ev.filePath, vertical: !!target.vertical, bitrateKbps: s.videoBitrate, fps: 30,
-      leadSec, fadeSec: (s.fadeMs || 0) / 1000,
+      leadSec: useSlate ? leadSec : 0,
+      fadeSec: (s.fadeMs || 0) / 1000,
       slateImage: useSlate ? s.slateImage : '', slateMusic: useSlate ? s.slateMusic : '',
       resumeOffsetSec, outUrl: joinRtmpUrl(target.server, target.key),
     });
@@ -138,8 +139,9 @@ function createScheduler({ store, portal, engineFactory, settings, now = () => D
       ev.doneAt = now(); renew(ev); persist();
       return;
     }
-    log('stream dropped, resuming at ' + offset + 's');
-    spawn(ev, { leadSec: 0, resumeOffsetSec: offset, target, retried: true, resumeCount: resumeCount + 1 });
+    const resumeLead = offset === 0 ? computeLeadSec(ev, now()) : 0;
+    log('stream dropped, resuming' + (offset === 0 ? ' (still pre-roll)' : ' at ' + offset + 's'));
+    spawn(ev, { leadSec: resumeLead, resumeOffsetSec: offset, target, retried: true, resumeCount: resumeCount + 1 });
   }
 
   async function takeover(prev) {
@@ -165,9 +167,11 @@ function createScheduler({ store, portal, engineFactory, settings, now = () => D
 
   async function tick() {
     const t = now();
+    const hasSlate = !!settings.get().slateImage;
     for (const ev of events) {
       if (ev.status !== 'pending') continue;
-      if (t < streamAtOf(ev)) continue;
+      const streamAt = hasSlate ? streamAtOf(ev) : ev.fireAt;
+      if (t < streamAt) continue;
       if (t - ev.fireAt > GRACE_MS) { markMissed(ev); continue; }
       if (ev.needsVideo) continue;             // a weekly slot with no video never goes live
       if (busy) continue;
@@ -196,6 +200,7 @@ function createScheduler({ store, portal, engineFactory, settings, now = () => D
   }
 
   function removeEvent(id) {
+    if (busy) return { ok: false, error: 'The scheduler is busy — try again in a moment.' };
     if (active && active.eventId === id) return { ok: false, error: 'Stop the live broadcast before removing it.' };
     const before = events.length;
     events = events.filter((e) => e.id !== id);
@@ -219,7 +224,7 @@ function createScheduler({ store, portal, engineFactory, settings, now = () => D
   }
 
   function onChanged(fn) { listeners.add(fn); return () => listeners.delete(fn); }
-  function start() { if (!timer) timer = setInterval(() => { tick().catch(() => {}); }, 1000); }
+  function start() { if (!timer) timer = setInterval(() => { tick().catch((e) => log('tick error: ' + ((e && e.message) || e))); }, 1000); }
   function stop() { if (timer) { clearInterval(timer); timer = null; } }
 
   return { tick, start, stop, getEvents, addEvent, removeEvent, stopActive, onChanged };

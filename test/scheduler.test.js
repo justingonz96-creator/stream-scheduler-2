@@ -18,7 +18,7 @@ function fakeEngine(offset = 5) {
   e.videoOffsetSec = () => offset;
   return e;
 }
-function harness({ events = [], target = { ok: true, server: 'rtmps://h/app', key: 'KEY', stationName: 'S', vertical: false }, offset = 5, onEndBroadcast = null } = {}) {
+function harness({ events = [], target = { ok: true, server: 'rtmps://h/app', key: 'KEY', stationName: 'S', vertical: false }, offset = 5, onEndBroadcast = null, slate = 'slate.png' } = {}) {
   const spawned = [];
   const ended = [];
   const order = [];   // records 'end' (portal) and 'stop' (engine) call ordering
@@ -31,7 +31,7 @@ function harness({ events = [], target = { ok: true, server: 'rtmps://h/app', ke
     streamTarget: async () => (typeof target === 'function' ? target() : target),
     endBroadcast: async (a) => { ended.push(a); order.push('end'); if (onEndBroadcast) onEndBroadcast(); return { ok: true }; },
   };
-  const settings = { get: () => ({ slateImage: 'slate.png', slateMusic: 'm.mp3', fadeMs: 1000, videoBitrate: 6000 }) };
+  const settings = { get: () => ({ slateImage: slate, slateMusic: slate ? 'm.mp3' : '', fadeMs: 1000, videoBitrate: 6000 }) };
   let clock = 0;
   let idc = 0;
   const store = memStore(events);
@@ -267,4 +267,42 @@ test('a store.save failure inside the sync playing handler does not throw', asyn
   h.setClock(70000); await h.sched.tick();
   h.failSave();
   assert.doesNotThrow(() => h.spawned[0].emit('playing'));
+});
+
+test('removeEvent is refused while the scheduler is busy going live (no ghost engine)', async () => {
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const h = harness({ events: [liveEvent()], target: async () => { await gate; return { ok: true, server: 'rtmps://h/app', key: 'KEY', vertical: false }; } });
+  h.setClock(70000);
+  const ticking = h.sched.tick();                     // enters goLive, awaits streamTarget (busy=true, active still null)
+  await new Promise((r) => setImmediate(r));
+  const r = h.sched.removeEvent('e1');
+  assert.equal(r.ok, false); assert.match(r.error, /busy/i);
+  release({ ok: true, server: 'rtmps://h/app', key: 'KEY', vertical: false });
+  await ticking; await new Promise((r) => setImmediate(r));
+  assert.equal(h.spawned.length, 1, 'exactly one engine, no ghost');
+  assert.ok(h.sched.getEvents().find((e) => e.id === 'e1'), 'event still present (remove was refused)');
+});
+
+test('a lead with NO slate image does not start the video early (starts at fireAt, leadSec 0)', async () => {
+  const h = harness({ events: [liveEvent()], slate: '' });   // leadMs 30000 but no slate image
+  h.setClock(70000); await h.sched.tick();
+  assert.equal(h.spawned.length, 0, 'must NOT go live 30 min early with no slate');
+  h.setClock(100000); await h.sched.tick();
+  assert.equal(h.spawned.length, 1, 'goes live at fireAt');
+  assert.equal(h.spawned[0].opts.leadSec, 0);
+  assert.equal(h.spawned[0].opts.slateImage, '');
+});
+
+test('a drop DURING the slate (offset 0) resumes with the slate/lead, not straight into the video', async () => {
+  const h = harness({ events: [liveEvent()], offset: 0 });
+  h.setClock(70000); await h.sched.tick();
+  h.spawned[0].emit('playing');                 // verified during slate (before fireAt)
+  h.setClock(85000);                            // still before fireAt (100000)
+  h.spawned[0].emit('failed', { reason: 'blip during slate' });
+  await new Promise((r) => setImmediate(r));
+  assert.equal(h.spawned.length, 2);
+  assert.ok(h.spawned[1].opts.leadSec > 0, 'resume keeps the remaining lead (video still rolls at fireAt)');
+  assert.equal(h.spawned[1].opts.slateImage, 'slate.png', 'slate shown again on the resume');
+  assert.equal(h.spawned[1].opts.resumeOffsetSec, 0);
 });
