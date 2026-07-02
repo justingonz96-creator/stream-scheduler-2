@@ -34,6 +34,25 @@ function recordedSpanSec(file) {
   return lines.length ? lines[lines.length - 1] - lines[0] : 0;
 }
 
+// Reused verbatim from scripts/rehearsal.js (Task 7) — samples a small
+// centered crop (not the whole frame) since the engine's `fit` filter can
+// letterbox source content into the recording canvas.
+function frameMeanRGB(file, atSec, w, h) {
+  const cw = Math.min(100, w), ch = Math.min(100, h);
+  const crop = `crop=${cw}:${ch}:(in_w-${cw})/2:(in_h-${ch})/2`;
+  const raw = execFileSync(ffmpegPath(),
+    ['-hide_banner', '-loglevel', 'error', '-ss', String(atSec), '-i', file,
+     '-frames:v', '1', '-vf', crop, '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'],
+    { maxBuffer: cw * ch * 3 + 1024 });
+  let r = 0, g = 0, b = 0; const n = Math.floor(raw.length / 3);
+  for (let i = 0; i < n * 3; i += 3) { r += raw[i]; g += raw[i + 1]; b += raw[i + 2]; }
+  return [r / n, g / n, b / n];
+}
+function probeJson(file) {
+  return JSON.parse(execFileSync(ffprobePath(),
+    ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', file]));
+}
+
 // Deviation from brief: force-killing the *recorder* on SIGTERM alone can hang
 // forever once mediamtx has torn down the path (Task 7's observed poll()/join
 // deadlock). Escalate to SIGKILL if it doesn't exit quickly. The recorder is a
@@ -74,11 +93,29 @@ function startRecorder(streamPath, to) {
   });
 }
 
+// In-harness fixture (not part of scripts/make-fixtures.sh, same pattern as
+// test/probe.test.js's silent.mp4): a 10s-green/10s-blue video. Duration alone
+// can't tell a correct resume-at-offset apart from a from-zero restart (see
+// task-8-report.md), so the rehearsal needs content that visibly differs
+// depending on where playback actually started.
+function makeTwoColorFixture() {
+  const twoColor = path.join(FIX, 'twocolor.mp4');
+  execFileSync(ffmpegPath(), ['-y', '-hide_banner', '-loglevel', 'error',
+    '-f', 'lavfi', '-i', 'color=c=green:size=1280x720:rate=30:duration=10',
+    '-f', 'lavfi', '-i', 'color=c=blue:size=1280x720:rate=30:duration=10',
+    '-f', 'lavfi', '-i', 'sine=frequency=880:duration=20',
+    '-filter_complex', '[0:v][1:v]concat=n=2:v=1:a=0[v]',
+    '-map', '[v]', '-map', '2:a', '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p',
+    '-c:a', 'aac', '-shortest', twoColor]);
+  return twoColor;
+}
+
 (async () => {
   const mtx = spawn('mediamtx', [path.join(__dirname, 'mediamtx-test.yml')], { stdio: 'ignore' });
   await new Promise(r => setTimeout(r, 1000));
+  const twoColor = makeTwoColorFixture();
   const opts = {
-    videoPath: path.join(FIX, 'class.mp4'), slateImage: path.join(FIX, 'slate.png'),
+    videoPath: twoColor, slateImage: path.join(FIX, 'slate.png'),
     slateMusic: path.join(FIX, 'music.mp3'), leadSec: LEAD, fadeSec: FADE,
     bitrateKbps: 2500, outUrl: 'rtmp://127.0.0.1:1935/live/resume',
   };
@@ -130,6 +167,20 @@ function startRecorder(streamPath, to) {
     // would be off by seconds of *video content*, e.g. wrong seek point,
     // which this tolerance would still catch).
     check('resumed segment ≈ remaining video', Math.abs(d2 - remain) < 5, `${d2.toFixed(1)}s vs ${remain.toFixed(1)}s`);
+
+    // Check 3 (the discriminating one): duration alone can't tell a correct
+    // resume apart from a from-zero restart (see task-8-report.md — a restart
+    // ignoring resumeOffsetSec plausibly lands within the <5s band above too).
+    // The proof a from-zero restart CANNOT pass: a correct resume (offset ≈5s
+    // into a 10s-green/10s-blue video) reaches BLUE within ~2s of the resumed
+    // recording's start (transition at (10 − offset) − attachGap ≈ ≤2s in); a
+    // from-zero restart is still GREEN there until ~5-6.5s. Sample at t=3s:
+    // blue = resumed, green = restarted.
+    const seg2Path = path.join(TMP, 'resume-seg2.flv');
+    const v2 = probeJson(seg2Path).streams.find(s => s.codec_type === 'video');
+    const rgb = frameMeanRGB(seg2Path, 3, v2.width, v2.height);
+    check('resumed at the right spot (frame at 3s is blue, not green)',
+          rgb[2] > 150 && rgb[1] < 90, `rgb ${rgb.map(x => x | 0)}`);
   } catch (e) {
     check('resume rehearsal ran to completion', false, e.message);
   }
