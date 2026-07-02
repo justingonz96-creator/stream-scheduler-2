@@ -888,7 +888,7 @@ function createPortalClient({ getConfig, transport, log = () => {}, now = () => 
       return { ok: true, stations: stationSummaries(st.stations) };
     },
 
-    async checkClassLink({ contentItemGuid, scheduleGuid = '' }) {
+    async checkClassLink({ contentItemGuid, scheduleGuid = '' } = {}) {
       if (!contentItemGuid) return { ok: false, error: 'No class link was given.' };
       const cfg = config();
       const auth = await login(cfg);
@@ -899,7 +899,7 @@ function createPortalClient({ getConfig, transport, log = () => {}, now = () => 
       return { ok: true, count: res.occurrences.length, picked, vertical: isVertical(res.medium), medium: res.medium };
     },
 
-    async streamTarget({ contentItemGuid, scheduleGuid = '' }) {
+    async streamTarget({ contentItemGuid, scheduleGuid = '' } = {}) {
       if (!contentItemGuid) return { ok: false, error: 'No class link was given.' };
       const cid = String(contentItemGuid).slice(0, 8);
       const cfg = config();
@@ -922,7 +922,7 @@ function createPortalClient({ getConfig, transport, log = () => {}, now = () => 
       return { ok: true, server: ingest.server, key: ingest.key, stationName: ingest.stationName, vertical };
     },
 
-    async endBroadcast({ contentItemGuid = '', scheduleGuid = '', stationGuid = '' }) {
+    async endBroadcast({ contentItemGuid = '', scheduleGuid = '', stationGuid = '' } = {}) {
       const cfg = config();
       const auth = await login(cfg);
       if (!auth.ok) return auth;
