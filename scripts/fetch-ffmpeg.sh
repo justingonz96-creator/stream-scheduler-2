@@ -1,17 +1,22 @@
 #!/bin/bash
 # Fetch static FFmpeg + ffprobe into resources/ffmpeg/<platform>/.
-# mac-arm64 from Martin Riedl's static builds; win-x64 from gyan.dev (used in Plan 4).
+# mac-arm64 and mac-x64 from Martin Riedl's static builds (universal Mac build needs both arches);
+# win-x64 from gyan.dev (used in Plan 4).
 set -e
 BASE="$(cd "$(dirname "$0")/.." && pwd)"
 DEST="$BASE/resources/ffmpeg"
-mkdir -p "$DEST/mac-arm64" "$DEST/win-x64"
+mkdir -p "$DEST/mac-arm64" "$DEST/mac-x64" "$DEST/win-x64"
 
 fetch_mac() {
-  for tool in ffmpeg ffprobe; do
-    if [ -x "$DEST/mac-arm64/$tool" ]; then echo "mac $tool: already present"; continue; fi
-    curl -fsSL "https://ffmpeg.martin-riedl.de/redirect/latest/macos/arm64/release/$tool.zip" -o /tmp/ss2-$tool.zip
-    unzip -oq /tmp/ss2-$tool.zip -d "$DEST/mac-arm64"; rm -f /tmp/ss2-$tool.zip
-    chmod +x "$DEST/mac-arm64/$tool"
+  for arch_pair in "arm64:mac-arm64" "amd64:mac-x64"; do
+    arch="${arch_pair%%:*}"
+    platform="${arch_pair##*:}"
+    for tool in ffmpeg ffprobe; do
+      if [ -x "$DEST/$platform/$tool" ]; then echo "$platform $tool: already present"; continue; fi
+      curl -fsSL "https://ffmpeg.martin-riedl.de/redirect/latest/macos/$arch/release/$tool.zip" -o /tmp/ss2-$tool.zip
+      unzip -oq /tmp/ss2-$tool.zip -d "$DEST/$platform"; rm -f /tmp/ss2-$tool.zip
+      chmod +x "$DEST/$platform/$tool"
+    done
   done
 }
 fetch_win() {
