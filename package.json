@@ -1,0 +1,16 @@
+{
+  "name": "stream-scheduler-2",
+  "productName": "Stream Scheduler",
+  "version": "2.0.0-dev",
+  "private": true,
+  "main": "app/main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/",
+    "fixtures": "bash scripts/make-fixtures.sh",
+    "rehearsal": "node scripts/rehearsal.js"
+  },
+  "devDependencies": {
+    "electron": "^43.0.0"
+  }
+}
