@@ -1,0 +1,55 @@
+'use strict';
+// Pure logic ported from 1.x portal-helper.py: a class (content item) embeds its
+// broadcast occurrences, each carrying its own scheduleGuid + control-station.
+// From the durable class link we can discover what to stream and what to end.
+
+const VERTICAL_MEDIUMS = new Set(['reflect']);   // Echelon Reflect (the mirror) is portrait 9:16
+
+function isVertical(medium) {
+  return VERTICAL_MEDIUMS.has(String(medium || '').trim().toLowerCase());
+}
+
+function parseContentItem(data) {
+  const item = (data && typeof data === 'object' && data.data && typeof data.data === 'object') ? data.data : (data || {});
+  const medium = item.medium == null ? null : item.medium;
+  const occurrences = [];
+  for (const s of (Array.isArray(item.schedule) ? item.schedule : [])) {
+    if (!s || typeof s !== 'object') continue;
+    const cs = s.controlStation || {};
+    const av = s.available || {};
+    occurrences.push({
+      scheduleGuid: s.guid ?? null,
+      stationGuid: cs.guid ?? null,
+      stationName: cs.name ?? null,
+      type: s.type ?? null,
+      start: av.start,
+      end: av.end,
+    });
+  }
+  return { occurrences, medium };
+}
+
+const GRACE = 2 * 3600;            // treat "now" as inside a window even a couple hours either side
+const DEFAULT_SPAN = 4 * 3600;     // occurrences without an end get a 4-hour window
+
+function pickOccurrence(occurrences, nowSec) {
+  const cands = occurrences.filter(o => o.scheduleGuid && o.stationGuid);
+  if (cands.length === 0) return null;
+  const timed = cands.filter(o => typeof o.start === 'number' && Number.isFinite(o.start));
+  const inWindow = timed.filter(o =>
+    (o.start - GRACE) <= nowSec && nowSec <= ((o.end || (o.start + DEFAULT_SPAN)) + GRACE));
+  if (inWindow.length > 0) {
+    return inWindow.slice().sort((a, b) => a.start - b.start)[inWindow.length - 1];  // latest start
+  }
+  if (timed.length > 0) {
+    return timed.reduce((best, o) => Math.abs(o.start - nowSec) < Math.abs(best.start - nowSec) ? o : best);
+  }
+  return cands[0];
+}
+
+function matchOccurrence(occurrences, scheduleGuid) {
+  if (!scheduleGuid) return null;
+  return occurrences.find(o => o.scheduleGuid === scheduleGuid) || null;
+}
+
+module.exports = { parseContentItem, pickOccurrence, matchOccurrence, isVertical, VERTICAL_MEDIUMS, GRACE };
