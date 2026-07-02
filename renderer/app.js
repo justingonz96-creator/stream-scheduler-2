@@ -137,7 +137,8 @@ if (typeof document !== 'undefined') {
     // update notice (spec §8): silent no-op on any failure, never blocks startup
     try {
       const upd = await api.invoke('update:check');
-      if (upd && upd.hasUpdate) { $('alertBar').textContent = 'A newer version (v' + upd.latestVersion + ') is available — ask the admin to update this computer.'; $('alertBar').className = 'alert warn'; }
+      // Never clobber a more important engine-failure alert with the update notice.
+      if (upd && upd.hasUpdate && $('alertBar').className !== 'alert bad') { $('alertBar').textContent = 'A newer version (v' + upd.latestVersion + ') is available — ask the admin to update this computer.'; $('alertBar').className = 'alert warn'; }
     } catch {}
     // wire buttons
     $('btnNew').onclick = showForm; $('btnCancel').onclick = hideForm;

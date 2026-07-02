@@ -232,7 +232,8 @@ Wiring: `app/ipc.js` — `createIpcHandlers({ ..., updates })` + entry `'update:
 ```js
     try {
       const upd = await api.invoke('update:check');
-      if (upd && upd.hasUpdate) { $('alertBar').textContent = 'A newer version (v' + upd.latestVersion + ') is available — ask the admin to update this computer.'; $('alertBar').className = 'alert warn'; }
+      // Never clobber a more important engine-failure alert with the update notice.
+      if (upd && upd.hasUpdate && $('alertBar').className !== 'alert bad') { $('alertBar').textContent = 'A newer version (v' + upd.latestVersion + ') is available — ask the admin to update this computer.'; $('alertBar').className = 'alert warn'; }
     } catch {}
 ```
 
