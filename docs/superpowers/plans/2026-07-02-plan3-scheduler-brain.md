@@ -1029,10 +1029,16 @@ function memStore(initial = []) {
   let data = initial.map((e) => ({ ...e })); let willFail = false;
   return { load: () => data.map((e) => ({ ...e })), save: (evs) => { if (willFail) throw new Error('disk full'); data = evs.map((e) => ({ ...e })); }, _fail: () => { willFail = true; } };
 }
-// in harness: capture logs + expose failSave (build the store first so we can ref it)
-//   const store = memStore(events); const logs = [];
-//   const sched = createScheduler({ store, portal, engineFactory, settings, now: () => clock, genId: () => 'gen' + (idc++), log: (m) => logs.push(m) });
-//   return { sched, spawned, ended, order, logs, setClock, getClock, failSave: () => store._fail() };
+// in harness: capture logs + expose failSave (build the store first so we can ref it),
+// and accept an onEndBroadcast hook that fires INSIDE the endBroadcast fake (used to
+// inject a failure during the portal-end await — the real takeover orphan window):
+//   function harness({ events = [], target = ..., offset = 5, onEndBroadcast = null } = {}) {
+//     ...
+//     const portal = { streamTarget: async () => ..., endBroadcast: async (a) => { ended.push(a); order.push('end'); if (onEndBroadcast) onEndBroadcast(); return { ok: true }; } };
+//     const store = memStore(events); const logs = [];
+//     const sched = createScheduler({ store, portal, engineFactory, settings, now: () => clock, genId: () => 'gen' + (idc++), log: (m) => logs.push(m) });
+//     return { sched, spawned, ended, order, logs, setClock, getClock, failSave: () => store._fail() };
+//   }
 
 test('instance guard: a late "playing" from a dead engine does not flip status', async () => {
   const h = harness({ events: [liveEvent()] });
@@ -1044,18 +1050,21 @@ test('instance guard: a late "playing" from a dead engine does not flip status',
   assert.equal(h.sched.getEvents()[0].status, 'starting', 'dead engine playing must be ignored');
 });
 
-test('takeover: a late failure from the outgoing engine cannot orphan a resume engine', async () => {
+test('takeover: a failure DURING the portal-end await cannot orphan a resume engine', async () => {
+  // Fire the outgoing engine's failure from INSIDE endBroadcast — i.e. exactly while
+  // takeover is awaiting the portal end (the original orphan window). With active nulled
+  // first, onFailed hits its guard and spawns nothing; pre-fix it would resume-spawn an
+  // A-engine (resumeOffsetSec === offset) that takeover then orphans → 3 engines.
+  let h;
   const a = liveEvent({ id: 'A', fireAt: 100000, leadMs: 30000 });
   const b = liveEvent({ id: 'B', fireAt: 160000, leadMs: 0, contentItemGuid: 'ci2', scheduleGuid: 'sg2' });
-  const h = harness({ events: [a, b] });
+  h = harness({ events: [a, b], offset: 42, onEndBroadcast: () => { if (h.spawned[0]) h.spawned[0].emit('failed', { reason: 'drop during end' }); } });
   h.setClock(70000); await h.sched.tick();
-  h.spawned[0].emit('playing');
-  h.setClock(160000); await h.sched.tick();                   // takeover A, go live B
+  h.spawned[0].emit('playing');                 // A live
+  h.setClock(160000); await h.sched.tick();      // takeover A (failure injected mid-await), then go live B
   await new Promise((r) => setImmediate(r));
-  const n = h.spawned.length;
-  h.spawned[0].emit('failed', { reason: 'late drop' });       // A's dead engine fires late
-  await new Promise((r) => setImmediate(r));
-  assert.equal(h.spawned.length, n, 'a late failure from the taken-over engine must spawn nothing');
+  assert.equal(h.spawned.length, 2, 'no orphaned resume engine for the taken-over event');
+  assert.equal(h.spawned[1].opts.resumeOffsetSec, 0, 'the 2nd engine is B fresh, not an A-resume (which would carry offset 42)');
   assert.equal(h.sched.getEvents().find((e) => e.id === 'A').status, 'done');
 });
 
