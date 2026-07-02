@@ -74,7 +74,12 @@ test('parseContentItem: missing available → start/end are null and SURVIVE JSO
 });
 
 test('pickOccurrence: end present but 0 falls back to start+14400 (|| semantics are law)', () => {
-  const NOW = 5000;
-  const o = { scheduleGuid: 'z', stationGuid: 'Z', start: 1000, end: 0 };   // end 0 → default span applies
-  assert.equal(pickOccurrence([o], NOW).scheduleGuid, 'z');                 // in window only via the default span
+  // Discriminating construction: with the correct || law, z's end:0 falls back to
+  // start+14400, so at NOW=20000 BOTH are in-window and z wins on latest start.
+  // If the || were ever "cleaned up" to ??, z's window would end at 0+GRACE=7200,
+  // z would drop out, and 'other' would win — flipping this assertion.
+  const NOW = 20000;
+  const z = { scheduleGuid: 'z', stationGuid: 'Z', start: 10000, end: 0 };
+  const other = { scheduleGuid: 'other', stationGuid: 'O', start: 9000, end: 40000 };
+  assert.equal(pickOccurrence([z, other], NOW).scheduleGuid, 'z');
 });
