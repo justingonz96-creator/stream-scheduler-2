@@ -121,6 +121,15 @@ test('endBroadcast: pasted scheduleGuid pins the exact occurrence; nothing found
   assert.match(re.error, /no live broadcast was found to end/i);
 });
 
+test('blank apiBase in config falls back to the real portal default (1.x law)', async () => {
+  const calls = [];
+  const cfgBlank = () => ({ ...CFG, apiBase: '' });
+  const c = createPortalClient({ getConfig: cfgBlank, transport: fakeTransport({ 'POST /auth': { status: 401, json: {} } }, calls), now: () => NOW });
+  await c.testLogin();
+  assert.match(calls[0].url, /^https:\/\/nestapi\.echelonfit\.com\/auth$/,
+    'auth must go to the default portal, not a blank base');
+});
+
 test('no-argument calls degrade to {ok:false}, never throw (never-throws law)', async () => {
   const c = createPortalClient({ getConfig, transport: fakeTransport({ ...AUTH_OK }), now: () => NOW });
   const a = await c.checkClassLink();
