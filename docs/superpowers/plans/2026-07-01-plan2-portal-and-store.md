@@ -834,6 +834,7 @@ function createPortalClient({ getConfig, transport, log = () => {}, now = () => 
     for (const k of ['email', 'password', 'apiKey', 'apiBase']) {
       if (overrides[k]) base[k] = overrides[k];
     }
+    if (!base.apiBase) base.apiBase = API_BASE_DEFAULT;   // a blank Setup field must never wipe the portal address (1.x law)
     return base;
   }
 
