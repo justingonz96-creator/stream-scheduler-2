@@ -53,6 +53,6 @@ function parseDateTime(dateStr, hour, min, ap) {
   return new Date(+m[1], +m[2] - 1, +m[3], h, mm, 0, 0).getTime();
 }
 
-const API = { fmtClock, fmtDateTime, statusPill, endsAround, buildTimeOptions, orientationLabel, parseDateTime };
-if (typeof module !== 'undefined' && module.exports) module.exports = API;
-if (typeof window !== 'undefined') window.Fmt = API;
+const FMT_API = { fmtClock, fmtDateTime, statusPill, endsAround, buildTimeOptions, orientationLabel, parseDateTime };
+if (typeof module !== 'undefined' && module.exports) module.exports = FMT_API;
+if (typeof window !== 'undefined') window.Fmt = FMT_API;

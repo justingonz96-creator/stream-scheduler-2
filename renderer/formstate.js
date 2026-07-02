@@ -28,6 +28,6 @@ function pickedSummary(state) {
   return basename(state.filePath) + ' · ' + mmss(state.durationSec);
 }
 
-const API = { computeFormPhase, pickedSummary };
-if (typeof module !== 'undefined' && module.exports) module.exports = API;
-if (typeof window !== 'undefined') window.FormState = API;
+const FORMSTATE_API = { computeFormPhase, pickedSummary };
+if (typeof module !== 'undefined' && module.exports) module.exports = FORMSTATE_API;
+if (typeof window !== 'undefined') window.FormState = FORMSTATE_API;

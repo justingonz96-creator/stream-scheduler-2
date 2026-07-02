@@ -282,9 +282,9 @@ function parseDateTime(dateStr, hour, min, ap) {
   return new Date(+m[1], +m[2] - 1, +m[3], h, mm, 0, 0).getTime();
 }
 
-const API = { fmtClock, fmtDateTime, statusPill, endsAround, buildTimeOptions, orientationLabel, parseDateTime };
-if (typeof module !== 'undefined' && module.exports) module.exports = API;
-if (typeof window !== 'undefined') window.Fmt = API;
+const FMT_API = { fmtClock, fmtDateTime, statusPill, endsAround, buildTimeOptions, orientationLabel, parseDateTime };   // unique name: classic scripts share ONE global scope — a duplicate top-level const is a SyntaxError
+if (typeof module !== 'undefined' && module.exports) module.exports = FMT_API;
+if (typeof window !== 'undefined') window.Fmt = FMT_API;
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
@@ -397,9 +397,9 @@ function pickedSummary(state) {
   return basename(state.filePath) + ' · ' + mmss(state.durationSec);
 }
 
-const API = { computeFormPhase, pickedSummary };
-if (typeof module !== 'undefined' && module.exports) module.exports = API;
-if (typeof window !== 'undefined') window.FormState = API;
+const FORMSTATE_API = { computeFormPhase, pickedSummary };   // unique name — see format.js footer note
+if (typeof module !== 'undefined' && module.exports) module.exports = FORMSTATE_API;
+if (typeof window !== 'undefined') window.FormState = FORMSTATE_API;
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
