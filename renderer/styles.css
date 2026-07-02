@@ -171,10 +171,11 @@
     border: 1px solid var(--bad-border); overflow-wrap: anywhere;
   }
   #alertBar.warn { background: var(--warn-soft); color: var(--warn); border-color: var(--warn-border); }
+  #alertBar.alert { display: block; }
 
   /* LIVE bar */
   #liveBar {
-    display: none; margin-top: var(--sp-4); border-radius: 14px; padding: var(--sp-4) var(--sp-5);
+    display: flex; margin-top: var(--sp-4); border-radius: 14px; padding: var(--sp-4) var(--sp-5);
     background: linear-gradient(100deg, #dc2626, #b91c1c); color: #fff;
     align-items: center; gap: var(--sp-3); flex-wrap: wrap;
     box-shadow: 0 16px 38px -16px rgba(220,38,38,0.40), var(--shadow-sm);
@@ -305,6 +306,7 @@
   }
   .form-error { display: none; margin-top: var(--sp-4); background: var(--bad-soft); color: var(--bad);
     border-radius: 10px; padding: 10px 14px; font-weight: 600; font-size: var(--fs-2); overflow-wrap: anywhere; }
+  .form-error:not(:empty) { display: block; }
 
   /* The "Remove?" delete-confirm prompt, injected into a schedule row's actions. */
   .ev-confirm { display: flex; gap: 8px; align-items: center; font-size: var(--fs-1); font-weight: 700; color: var(--bad); }

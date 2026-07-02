@@ -194,7 +194,8 @@ function createScheduler({ store, portal, engineFactory, settings, now = () => D
   }
 
   function addEvent(ev) {
-    const norm = normalizeEvent({ ...ev, id: ev.id || genId() });
+    // IPC payloads can never inject lifecycle state: born pending, no slot identity.
+    const norm = normalizeEvent({ ...ev, id: ev.id || genId(), status: 'pending', outcome: '', doneAt: 0, slotId: '', needsVideo: false });
     events.push(norm); persist();
     return { ...norm };
   }

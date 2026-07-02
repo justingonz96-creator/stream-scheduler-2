@@ -62,7 +62,6 @@ function createWindow() {
   });
   scheduler.onChanged((events) => { if (!win.isDestroyed()) win.webContents.send('schedule:changed', events); });
   scheduler.start();
-  ffmpeg.selfCheck().then((r) => { if (!win.isDestroyed()) win.webContents.send('engine:selfCheck', r); });
 }
 app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
 app.whenReady().then(createWindow);
