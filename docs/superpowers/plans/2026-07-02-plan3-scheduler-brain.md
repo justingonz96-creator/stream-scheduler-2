@@ -904,6 +904,206 @@ git add schedule/scheduler.js test/scheduler.test.js
 git commit -m "feat: scheduler state machine — go-live, verified start, retry/resume, weekly renewal, laws"
 ```
 
+#### Task 4 — review-mandated amendments (apply after Step 5)
+
+The whole-branch-grade review of this task found four reachable, plan-mandated defects. The fixes are all local to `schedule/scheduler.js` (+ harness/tests). Replace the named functions with the versions below and add a `redactSecrets` helper + the new tests. Then `npm test` → 83 tests, 0 fail.
+
+**(a) `redactSecrets` helper** — add inside the factory (near `endPortal`):
+```js
+  // The engine's failure reason can embed ffmpeg stderr, which on a connection
+  // error prints the full output URL — INCLUDING the stream key. Scrub it before
+  // anything reaches a log line or the persisted outcome (key-secrecy law).
+  function redactSecrets(text, target) {
+    let s = String(text == null ? '' : text);
+    if (target) {
+      if (target.server && target.key) { const u = joinRtmpUrl(target.server, target.key); if (u) s = s.split(u).join('***'); }
+      if (target.key) s = s.split(target.key).join('***');
+    }
+    return s;
+  }
+```
+
+**(b) `spawn`** — capture the instance in the listeners; guard the floating async handlers; wrap the sync one:
+```js
+  function spawn(ev, { leadSec, resumeOffsetSec, target, retried, resumeCount }) {
+    const s = settings.get();
+    const useSlate = leadSec > 0;
+    const bc = engineFactory({
+      videoPath: ev.filePath, vertical: !!target.vertical, bitrateKbps: s.videoBitrate, fps: 30,
+      leadSec, fadeSec: (s.fadeMs || 0) / 1000,
+      slateImage: useSlate ? s.slateImage : '', slateMusic: useSlate ? s.slateMusic : '',
+      resumeOffsetSec, outUrl: joinRtmpUrl(target.server, target.key),
+    });
+    active = { eventId: ev.id, broadcast: bc, target, sawPlaying: false, retried, resumeCount };
+    bc.on('playing', () => { try { onPlaying(ev.id, bc); } catch (e) { log('playing handler error: ' + ((e && e.message) || e)); } });
+    bc.on('ended', () => { onEnded(ev.id, bc).catch((e) => log('ended handler error: ' + ((e && e.message) || e))); });
+    bc.on('failed', (info) => { onFailed(ev.id, (info && info.reason) || 'unknown', bc).catch((e) => log('failed handler error: ' + ((e && e.message) || e))); });
+    try { bc.start(); }
+    catch (e) { onFailed(ev.id, (e && e.message) || 'the video engine could not start', bc).catch(() => {}); }
+  }
+```
+
+**(c) `onPlaying` / `onEnded` / `onFailed`** — add the `bc` param and the `active.broadcast !== bc` instance guard; redact reasons:
+```js
+  function onPlaying(id, bc) {
+    if (!active || active.eventId !== id || active.broadcast !== bc) return;
+    active.sawPlaying = true;
+    const ev = byId(id); if (!ev) return;
+    ev.status = now() >= ev.fireAt ? 'playing' : 'preshow';
+    persist();
+  }
+
+  async function onEnded(id, bc) {
+    if (!active || active.eventId !== id || active.broadcast !== bc) return;
+    const ev = byId(id); active = null;
+    if (!ev) return;
+    if (ev.autoStop) { await endPortal(ev); ev.outcome = 'Played ✓ and the stream ended'; }
+    else { ev.outcome = 'Played ✓ — video finished (portal broadcast left open, as requested)'; }
+    ev.status = 'done'; ev.doneAt = now();
+    renew(ev); persist();
+  }
+
+  async function onFailed(id, reason, bc) {
+    if (!active || active.eventId !== id || active.broadcast !== bc) return;
+    const ev = byId(id); if (!ev) { active = null; return; }
+    const { sawPlaying, retried, resumeCount, target, broadcast } = active;
+    const safeReason = redactSecrets(reason, target);
+    if (!sawPlaying) {
+      active = null;
+      if (!retried) {
+        log('start failed, retrying once: ' + safeReason);
+        spawn(ev, { leadSec: computeLeadSec(ev, now()), resumeOffsetSec: 0, target, retried: true, resumeCount });
+      } else { fail(ev, safeReason); }
+      return;
+    }
+    const offset = typeof broadcast.videoOffsetSec === 'function' ? broadcast.videoOffsetSec() : 0;
+    active = null;
+    if (now() >= plannedVideoEndAtMs(ev) - 1500) {
+      if (ev.autoStop) { await endPortal(ev); ev.outcome = 'Played ✓ and the stream ended'; }
+      else { ev.outcome = 'Played ✓ — video finished (portal broadcast left open, as requested)'; }
+      ev.status = 'done'; ev.doneAt = now(); renew(ev); persist();
+      return;
+    }
+    if (resumeCount >= MAX_RESUMES) {
+      await endPortal(ev);
+      ev.status = 'failed'; ev.outcome = 'The stream kept dropping and could not be recovered';
+      ev.doneAt = now(); renew(ev); persist();
+      return;
+    }
+    log('stream dropped, resuming at ' + offset + 's');
+    spawn(ev, { leadSec: 0, resumeOffsetSec: offset, target, retried: true, resumeCount: resumeCount + 1 });
+  }
+```
+
+**(d) `takeover`** — unlink `active` BEFORE the awaited portal call (kills the orphan race), keeping end-portal-before-stop:
+```js
+  async function takeover(prev) {
+    const bc = active && active.broadcast;
+    active = null;                                 // unlink FIRST — a late event from the outgoing engine can't resume-spawn
+    prev.status = 'done';
+    prev.outcome = 'Ended early — the next scheduled video started';
+    prev.doneAt = now();
+    if (prev.autoStop) await endPortal(prev);      // end-portal-before-stop
+    try { if (bc) bc.stop(); } catch {}
+    renew(prev); persist();
+  }
+```
+
+**(e) `goLive`** — guard a `streamTarget` rejection so a client bug can't strand the event at `starting`:
+```js
+  async function goLive(ev) {
+    ev.status = 'starting'; persist();
+    log('starting broadcast: ' + (ev.title || ev.fileName || ev.id));
+    let target;
+    try { target = await portal.streamTarget({ contentItemGuid: ev.contentItemGuid, scheduleGuid: ev.scheduleGuid }); }
+    catch (e) { fail(ev, 'the studio could not be reached: ' + ((e && e.message) || e)); return; }
+    if (!target || !target.ok) { fail(ev, (target && target.error) || 'no studio was returned by the portal'); return; }
+    spawn(ev, { leadSec: computeLeadSec(ev, now()), resumeOffsetSec: 0, target, retried: false, resumeCount: 0 });
+  }
+```
+
+**(f) Harness + new tests** — extend the harness to record logs and to fail persistence on demand, then add five tests:
+```js
+// in memStore: add a fail toggle
+function memStore(initial = []) {
+  let data = initial.map((e) => ({ ...e })); let willFail = false;
+  return { load: () => data.map((e) => ({ ...e })), save: (evs) => { if (willFail) throw new Error('disk full'); data = evs.map((e) => ({ ...e })); }, _fail: () => { willFail = true; } };
+}
+// in harness: capture logs + expose failSave (build the store first so we can ref it),
+// and accept an onEndBroadcast hook that fires INSIDE the endBroadcast fake (used to
+// inject a failure during the portal-end await — the real takeover orphan window):
+//   function harness({ events = [], target = ..., offset = 5, onEndBroadcast = null } = {}) {
+//     ...
+//     const portal = { streamTarget: async () => ..., endBroadcast: async (a) => { ended.push(a); order.push('end'); if (onEndBroadcast) onEndBroadcast(); return { ok: true }; } };
+//     const store = memStore(events); const logs = [];
+//     const sched = createScheduler({ store, portal, engineFactory, settings, now: () => clock, genId: () => 'gen' + (idc++), log: (m) => logs.push(m) });
+//     return { sched, spawned, ended, order, logs, setClock, getClock, failSave: () => store._fail() };
+//   }
+
+test('instance guard: a late "playing" from a dead engine does not flip status', async () => {
+  const h = harness({ events: [liveEvent()] });
+  h.setClock(70000); await h.sched.tick();
+  h.spawned[0].emit('failed', { reason: 'start fail' });      // retry → spawned[1]
+  await new Promise((r) => setImmediate(r));
+  assert.equal(h.spawned.length, 2);
+  h.spawned[0].emit('playing');                                // dead instance emits late
+  assert.equal(h.sched.getEvents()[0].status, 'starting', 'dead engine playing must be ignored');
+});
+
+test('takeover: a failure DURING the portal-end await cannot orphan a resume engine', async () => {
+  // Fire the outgoing engine's failure from INSIDE endBroadcast — i.e. exactly while
+  // takeover is awaiting the portal end (the original orphan window). With active nulled
+  // first, onFailed hits its guard and spawns nothing; pre-fix it would resume-spawn an
+  // A-engine (resumeOffsetSec === offset) that takeover then orphans → 3 engines.
+  let h;
+  const a = liveEvent({ id: 'A', fireAt: 100000, leadMs: 30000 });
+  const b = liveEvent({ id: 'B', fireAt: 160000, leadMs: 0, contentItemGuid: 'ci2', scheduleGuid: 'sg2' });
+  h = harness({ events: [a, b], offset: 42, onEndBroadcast: () => { if (h.spawned[0]) h.spawned[0].emit('failed', { reason: 'drop during end' }); } });
+  h.setClock(70000); await h.sched.tick();
+  h.spawned[0].emit('playing');                 // A live
+  h.setClock(160000); await h.sched.tick();      // takeover A (failure injected mid-await), then go live B
+  await new Promise((r) => setImmediate(r));
+  assert.equal(h.spawned.length, 2, 'no orphaned resume engine for the taken-over event');
+  assert.equal(h.spawned[1].opts.resumeOffsetSec, 0, 'the 2nd engine is B fresh, not an A-resume (which would carry offset 42)');
+  assert.equal(h.sched.getEvents().find((e) => e.id === 'A').status, 'done');
+});
+
+test('key redaction: a stream key in a failure reason never reaches outcome or logs', async () => {
+  const h = harness({ events: [liveEvent()] });      // target.key === 'KEY', server 'rtmps://h/app'
+  h.setClock(70000); await h.sched.tick();
+  h.spawned[0].emit('failed', { reason: 'rtmps://h/app/KEY: Input/output error' });
+  await new Promise((r) => setImmediate(r));          // retry
+  h.spawned[1].emit('failed', { reason: 'rtmps://h/app/KEY: Input/output error' });
+  await new Promise((r) => setImmediate(r));          // fail
+  const ev = h.sched.getEvents()[0];
+  assert.equal(ev.status, 'failed');
+  assert.ok(!ev.outcome.includes('KEY'), 'key must not be in the persisted outcome');
+  assert.ok(!h.logs.join('\n').includes('KEY'), 'key must not be in logs');
+});
+
+test('a store.save failure inside the async ended handler does not throw or reject unhandled', async () => {
+  const h = harness({ events: [liveEvent()] });
+  h.setClock(70000); await h.sched.tick();
+  h.spawned[0].emit('playing');
+  h.failSave();
+  assert.doesNotThrow(() => h.spawned[0].emit('ended'));
+  await new Promise((r) => setImmediate(r));           // rejection, if any, is swallowed by the handler's .catch
+});
+
+test('a store.save failure inside the sync playing handler does not throw', async () => {
+  const h = harness({ events: [liveEvent()] });
+  h.setClock(70000); await h.sched.tick();
+  h.failSave();
+  assert.doesNotThrow(() => h.spawned[0].emit('playing'));
+});
+```
+
+Commit the amendments:
+```bash
+git add schedule/scheduler.js test/scheduler.test.js
+git commit -m "fix: takeover orphan race, unhandled-rejection guards, key redaction, instance guard"
+```
+
 ---
 
 ### Task 5: `portal/link.js` + `app/ipc.js` — link parsing + the IPC handler map
@@ -1251,6 +1451,130 @@ git commit -m "feat: Electron wiring (main+preload) and headless brain rehearsal
 ```
 
 ---
+
+#### Final-review-mandated fixes (apply to `schedule/scheduler.js` + `test/scheduler.test.js`)
+
+The whole-branch review found two must-fix seam hazards (one proven by repro) plus two safe hardenings. All local to the scheduler. After applying, `npm test` → 94, and re-run the brain rehearsal.
+
+**(g) `removeEvent` — add the `busy` guard (ghost-engine race):** a remove during `goLive`'s awaited `streamTarget` (event `starting`, `active` still null) currently drops the event, then `goLive` spawns an engine for a gone event — invisible, unstoppable, and it wedges the scheduler. Mirror `stopActive`:
+```js
+  function removeEvent(id) {
+    if (busy) return { ok: false, error: 'The scheduler is busy — try again in a moment.' };
+    if (active && active.eventId === id) return { ok: false, error: 'Stop the live broadcast before removing it.' };
+    const before = events.length;
+    events = events.filter((e) => e.id !== id);
+    if (events.length === before) return { ok: false, error: 'That broadcast was not found.' };
+    persist();
+    return { ok: true };
+  }
+```
+
+**(h) Lead-without-slate must not start early:** `tick` must not go live before `fireAt` when no slate image is configured (else the video plays up to the whole lead early), and `spawn` must never hand the engine a positive `leadSec` with a blank slate image. Replace `tick`'s pending gate and `spawn`:
+```js
+  // tick(): compute the effective start time — no slate image ⇒ never before fireAt
+  async function tick() {
+    const t = now();
+    const hasSlate = !!settings.get().slateImage;
+    for (const ev of events) {
+      if (ev.status !== 'pending') continue;
+      const streamAt = hasSlate ? streamAtOf(ev) : ev.fireAt;
+      if (t < streamAt) continue;
+      if (t - ev.fireAt > GRACE_MS) { markMissed(ev); continue; }
+      if (ev.needsVideo) continue;
+      if (busy) continue;
+      if (active) {
+        const cur = byId(active.eventId);
+        if (cur && cur.id !== ev.id && ['starting', 'preshow', 'playing'].includes(cur.status)) {
+          busy = true;
+          try { await takeover(cur); await goLive(ev); } finally { busy = false; }
+        }
+        continue;
+      }
+      busy = true;
+      try { await goLive(ev); } finally { busy = false; }
+    }
+    if (active) {
+      const cur = byId(active.eventId);
+      if (cur && cur.status === 'preshow' && t >= cur.fireAt) { cur.status = 'playing'; persist(); }
+    }
+  }
+```
+```js
+  // spawn(): a lead with no slate image ⇒ leadSec 0 (video rolls at fireAt, never early)
+  function spawn(ev, { leadSec, resumeOffsetSec, target, retried, resumeCount }) {
+    const s = settings.get();
+    const useSlate = leadSec > 0 && !!s.slateImage;
+    const bc = engineFactory({
+      videoPath: ev.filePath, vertical: !!target.vertical, bitrateKbps: s.videoBitrate, fps: 30,
+      leadSec: useSlate ? leadSec : 0,
+      fadeSec: (s.fadeMs || 0) / 1000,
+      slateImage: useSlate ? s.slateImage : '',
+      slateMusic: useSlate ? s.slateMusic : '',
+      resumeOffsetSec, outUrl: joinRtmpUrl(target.server, target.key),
+    });
+    active = { eventId: ev.id, broadcast: bc, target, sawPlaying: false, retried, resumeCount };
+    bc.on('playing', () => { try { onPlaying(ev.id, bc); } catch (e) { log('playing handler error: ' + ((e && e.message) || e)); } });
+    bc.on('ended', () => { onEnded(ev.id, bc).catch((e) => log('ended handler error: ' + ((e && e.message) || e))); });
+    bc.on('failed', (info) => { onFailed(ev.id, (info && info.reason) || 'unknown', bc).catch((e) => log('failed handler error: ' + ((e && e.message) || e))); });
+    try { bc.start(); }
+    catch (e) { onFailed(ev.id, (e && e.message) || 'the video engine could not start', bc).catch(() => {}); }
+  }
+```
+
+**(i) Resume during the slate keeps the lead** (offset 0 ⟺ video hadn't started): in `onFailed`'s resume path, replace the hardcoded `leadSec: 0`:
+```js
+    const resumeLead = offset === 0 ? computeLeadSec(ev, now()) : 0;
+    log('stream dropped, resuming' + (offset === 0 ? ' (still pre-roll)' : ' at ' + offset + 's'));
+    spawn(ev, { leadSec: resumeLead, resumeOffsetSec: offset, target, retried: true, resumeCount: resumeCount + 1 });
+```
+
+**(j) Don't silently swallow tick failures:**
+```js
+  function start() { if (!timer) timer = setInterval(() => { tick().catch((e) => log('tick error: ' + ((e && e.message) || e))); }, 1000); }
+```
+
+**(k) Harness + three new tests.** Add a `slate = 'slate.png'` option to `harness` feeding `settings.slateImage` (and `slateMusic: slate ? 'm.mp3' : ''`); the `target` option already accepts a function. Add:
+```js
+test('removeEvent is refused while the scheduler is busy going live (no ghost engine)', async () => {
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const h = harness({ events: [liveEvent()], target: async () => { await gate; return { ok: true, server: 'rtmps://h/app', key: 'KEY', vertical: false }; } });
+  h.setClock(70000);
+  const ticking = h.sched.tick();                     // enters goLive, awaits streamTarget (busy=true, active still null)
+  await new Promise((r) => setImmediate(r));
+  const r = h.sched.removeEvent('e1');
+  assert.equal(r.ok, false); assert.match(r.error, /busy/i);
+  release({ ok: true, server: 'rtmps://h/app', key: 'KEY', vertical: false });
+  await ticking; await new Promise((r) => setImmediate(r));
+  assert.equal(h.spawned.length, 1, 'exactly one engine, no ghost');
+  assert.ok(h.sched.getEvents().find((e) => e.id === 'e1'), 'event still present (remove was refused)');
+});
+
+test('a lead with NO slate image does not start the video early (starts at fireAt, leadSec 0)', async () => {
+  const h = harness({ events: [liveEvent()], slate: '' });   // leadMs 30000 but no slate image
+  h.setClock(70000); await h.sched.tick();
+  assert.equal(h.spawned.length, 0, 'must NOT go live 30 min early with no slate');
+  h.setClock(100000); await h.sched.tick();
+  assert.equal(h.spawned.length, 1, 'goes live at fireAt');
+  assert.equal(h.spawned[0].opts.leadSec, 0);
+  assert.equal(h.spawned[0].opts.slateImage, '');
+});
+
+test('a drop DURING the slate (offset 0) resumes with the slate/lead, not straight into the video', async () => {
+  const h = harness({ events: [liveEvent()], offset: 0 });
+  h.setClock(70000); await h.sched.tick();
+  h.spawned[0].emit('playing');                 // verified during slate (before fireAt)
+  h.setClock(85000);                            // still before fireAt (100000)
+  h.spawned[0].emit('failed', { reason: 'blip during slate' });
+  await new Promise((r) => setImmediate(r));
+  assert.equal(h.spawned.length, 2);
+  assert.ok(h.spawned[1].opts.leadSec > 0, 'resume keeps the remaining lead (video still rolls at fireAt)');
+  assert.equal(h.spawned[1].opts.slateImage, 'slate.png', 'slate shown again on the resume');
+  assert.equal(h.spawned[1].opts.resumeOffsetSec, 0);
+});
+```
+
+Commit: `git add schedule/scheduler.js test/scheduler.test.js && git commit -m "fix: removeEvent busy guard, lead-without-slate never early, resume keeps slate lead"`
 
 ## Definition of Done (Plan 3)
 
