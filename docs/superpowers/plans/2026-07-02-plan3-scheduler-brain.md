@@ -1452,6 +1452,130 @@ git commit -m "feat: Electron wiring (main+preload) and headless brain rehearsal
 
 ---
 
+#### Final-review-mandated fixes (apply to `schedule/scheduler.js` + `test/scheduler.test.js`)
+
+The whole-branch review found two must-fix seam hazards (one proven by repro) plus two safe hardenings. All local to the scheduler. After applying, `npm test` → 94, and re-run the brain rehearsal.
+
+**(g) `removeEvent` — add the `busy` guard (ghost-engine race):** a remove during `goLive`'s awaited `streamTarget` (event `starting`, `active` still null) currently drops the event, then `goLive` spawns an engine for a gone event — invisible, unstoppable, and it wedges the scheduler. Mirror `stopActive`:
+```js
+  function removeEvent(id) {
+    if (busy) return { ok: false, error: 'The scheduler is busy — try again in a moment.' };
+    if (active && active.eventId === id) return { ok: false, error: 'Stop the live broadcast before removing it.' };
+    const before = events.length;
+    events = events.filter((e) => e.id !== id);
+    if (events.length === before) return { ok: false, error: 'That broadcast was not found.' };
+    persist();
+    return { ok: true };
+  }
+```
+
+**(h) Lead-without-slate must not start early:** `tick` must not go live before `fireAt` when no slate image is configured (else the video plays up to the whole lead early), and `spawn` must never hand the engine a positive `leadSec` with a blank slate image. Replace `tick`'s pending gate and `spawn`:
+```js
+  // tick(): compute the effective start time — no slate image ⇒ never before fireAt
+  async function tick() {
+    const t = now();
+    const hasSlate = !!settings.get().slateImage;
+    for (const ev of events) {
+      if (ev.status !== 'pending') continue;
+      const streamAt = hasSlate ? streamAtOf(ev) : ev.fireAt;
+      if (t < streamAt) continue;
+      if (t - ev.fireAt > GRACE_MS) { markMissed(ev); continue; }
+      if (ev.needsVideo) continue;
+      if (busy) continue;
+      if (active) {
+        const cur = byId(active.eventId);
+        if (cur && cur.id !== ev.id && ['starting', 'preshow', 'playing'].includes(cur.status)) {
+          busy = true;
+          try { await takeover(cur); await goLive(ev); } finally { busy = false; }
+        }
+        continue;
+      }
+      busy = true;
+      try { await goLive(ev); } finally { busy = false; }
+    }
+    if (active) {
+      const cur = byId(active.eventId);
+      if (cur && cur.status === 'preshow' && t >= cur.fireAt) { cur.status = 'playing'; persist(); }
+    }
+  }
+```
+```js
+  // spawn(): a lead with no slate image ⇒ leadSec 0 (video rolls at fireAt, never early)
+  function spawn(ev, { leadSec, resumeOffsetSec, target, retried, resumeCount }) {
+    const s = settings.get();
+    const useSlate = leadSec > 0 && !!s.slateImage;
+    const bc = engineFactory({
+      videoPath: ev.filePath, vertical: !!target.vertical, bitrateKbps: s.videoBitrate, fps: 30,
+      leadSec: useSlate ? leadSec : 0,
+      fadeSec: (s.fadeMs || 0) / 1000,
+      slateImage: useSlate ? s.slateImage : '',
+      slateMusic: useSlate ? s.slateMusic : '',
+      resumeOffsetSec, outUrl: joinRtmpUrl(target.server, target.key),
+    });
+    active = { eventId: ev.id, broadcast: bc, target, sawPlaying: false, retried, resumeCount };
+    bc.on('playing', () => { try { onPlaying(ev.id, bc); } catch (e) { log('playing handler error: ' + ((e && e.message) || e)); } });
+    bc.on('ended', () => { onEnded(ev.id, bc).catch((e) => log('ended handler error: ' + ((e && e.message) || e))); });
+    bc.on('failed', (info) => { onFailed(ev.id, (info && info.reason) || 'unknown', bc).catch((e) => log('failed handler error: ' + ((e && e.message) || e))); });
+    try { bc.start(); }
+    catch (e) { onFailed(ev.id, (e && e.message) || 'the video engine could not start', bc).catch(() => {}); }
+  }
+```
+
+**(i) Resume during the slate keeps the lead** (offset 0 ⟺ video hadn't started): in `onFailed`'s resume path, replace the hardcoded `leadSec: 0`:
+```js
+    const resumeLead = offset === 0 ? computeLeadSec(ev, now()) : 0;
+    log('stream dropped, resuming' + (offset === 0 ? ' (still pre-roll)' : ' at ' + offset + 's'));
+    spawn(ev, { leadSec: resumeLead, resumeOffsetSec: offset, target, retried: true, resumeCount: resumeCount + 1 });
+```
+
+**(j) Don't silently swallow tick failures:**
+```js
+  function start() { if (!timer) timer = setInterval(() => { tick().catch((e) => log('tick error: ' + ((e && e.message) || e))); }, 1000); }
+```
+
+**(k) Harness + three new tests.** Add a `slate = 'slate.png'` option to `harness` feeding `settings.slateImage` (and `slateMusic: slate ? 'm.mp3' : ''`); the `target` option already accepts a function. Add:
+```js
+test('removeEvent is refused while the scheduler is busy going live (no ghost engine)', async () => {
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const h = harness({ events: [liveEvent()], target: async () => { await gate; return { ok: true, server: 'rtmps://h/app', key: 'KEY', vertical: false }; } });
+  h.setClock(70000);
+  const ticking = h.sched.tick();                     // enters goLive, awaits streamTarget (busy=true, active still null)
+  await new Promise((r) => setImmediate(r));
+  const r = h.sched.removeEvent('e1');
+  assert.equal(r.ok, false); assert.match(r.error, /busy/i);
+  release({ ok: true, server: 'rtmps://h/app', key: 'KEY', vertical: false });
+  await ticking; await new Promise((r) => setImmediate(r));
+  assert.equal(h.spawned.length, 1, 'exactly one engine, no ghost');
+  assert.ok(h.sched.getEvents().find((e) => e.id === 'e1'), 'event still present (remove was refused)');
+});
+
+test('a lead with NO slate image does not start the video early (starts at fireAt, leadSec 0)', async () => {
+  const h = harness({ events: [liveEvent()], slate: '' });   // leadMs 30000 but no slate image
+  h.setClock(70000); await h.sched.tick();
+  assert.equal(h.spawned.length, 0, 'must NOT go live 30 min early with no slate');
+  h.setClock(100000); await h.sched.tick();
+  assert.equal(h.spawned.length, 1, 'goes live at fireAt');
+  assert.equal(h.spawned[0].opts.leadSec, 0);
+  assert.equal(h.spawned[0].opts.slateImage, '');
+});
+
+test('a drop DURING the slate (offset 0) resumes with the slate/lead, not straight into the video', async () => {
+  const h = harness({ events: [liveEvent()], offset: 0 });
+  h.setClock(70000); await h.sched.tick();
+  h.spawned[0].emit('playing');                 // verified during slate (before fireAt)
+  h.setClock(85000);                            // still before fireAt (100000)
+  h.spawned[0].emit('failed', { reason: 'blip during slate' });
+  await new Promise((r) => setImmediate(r));
+  assert.equal(h.spawned.length, 2);
+  assert.ok(h.spawned[1].opts.leadSec > 0, 'resume keeps the remaining lead (video still rolls at fireAt)');
+  assert.equal(h.spawned[1].opts.slateImage, 'slate.png', 'slate shown again on the resume');
+  assert.equal(h.spawned[1].opts.resumeOffsetSec, 0);
+});
+```
+
+Commit: `git add schedule/scheduler.js test/scheduler.test.js && git commit -m "fix: removeEvent busy guard, lead-without-slate never early, resume keeps slate lead"`
+
 ## Definition of Done (Plan 3)
 
 - `npm test` — 86 tests, 0 fail, fully offline (no Electron, no network, no real portal).
