@@ -31,7 +31,7 @@
 - Modify: `.gitignore`
 
 **Interfaces:**
-- Produces: `npm start` opens an empty app window titled "Stream Scheduler 2.0"; `npm test` runs `node --test test/`.
+- Produces: `npm start` opens an empty app window titled "Stream Scheduler 2.0"; `npm test` runs `node --test` (runner self-discovers test/*.test.js; the directory-arg form broke on Node 26).
 
 - [ ] **Step 1: Write `package.json`**
 
@@ -44,7 +44,7 @@
   "main": "app/main.js",
   "scripts": {
     "start": "electron .",
-    "test": "node --test test/",
+    "test": "node --test",
     "fixtures": "bash scripts/make-fixtures.sh",
     "rehearsal": "node scripts/rehearsal.js"
   }
