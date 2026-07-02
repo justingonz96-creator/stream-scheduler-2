@@ -216,6 +216,13 @@ test('addEvent normalizes + persists; removeEvent refuses the live event', async
   assert.match(r.error, /Stop the live broadcast/i);
 });
 
+test('addEvent sanitizes lifecycle fields from wire payloads', () => {
+  const h = harness({ events: [] });
+  const ev = h.sched.addEvent({ title: 'X', filePath: '/v.mp4', durationSec: 1, fireAt: 99, status: 'playing', outcome: 'fake', doneAt: 123, slotId: 'stolen', needsVideo: true });
+  assert.equal(ev.status, 'pending'); assert.equal(ev.outcome, ''); assert.equal(ev.doneAt, 0);
+  assert.equal(ev.slotId, ''); assert.equal(ev.needsVideo, false);
+});
+
 test('instance guard: a late "playing" from a dead engine does not flip status', async () => {
   const h = harness({ events: [liveEvent()] });
   h.setClock(70000); await h.sched.tick();

@@ -282,9 +282,9 @@ function parseDateTime(dateStr, hour, min, ap) {
   return new Date(+m[1], +m[2] - 1, +m[3], h, mm, 0, 0).getTime();
 }
 
-const API = { fmtClock, fmtDateTime, statusPill, endsAround, buildTimeOptions, orientationLabel, parseDateTime };
-if (typeof module !== 'undefined' && module.exports) module.exports = API;
-if (typeof window !== 'undefined') window.Fmt = API;
+const FMT_API = { fmtClock, fmtDateTime, statusPill, endsAround, buildTimeOptions, orientationLabel, parseDateTime };   // unique name: classic scripts share ONE global scope — a duplicate top-level const is a SyntaxError
+if (typeof module !== 'undefined' && module.exports) module.exports = FMT_API;
+if (typeof window !== 'undefined') window.Fmt = FMT_API;
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
@@ -397,9 +397,9 @@ function pickedSummary(state) {
   return basename(state.filePath) + ' · ' + mmss(state.durationSec);
 }
 
-const API = { computeFormPhase, pickedSummary };
-if (typeof module !== 'undefined' && module.exports) module.exports = API;
-if (typeof window !== 'undefined') window.FormState = API;
+const FORMSTATE_API = { computeFormPhase, pickedSummary };   // unique name — see format.js footer note
+if (typeof module !== 'undefined' && module.exports) module.exports = FORMSTATE_API;
+if (typeof window !== 'undefined') window.FormState = FORMSTATE_API;
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
@@ -788,6 +788,9 @@ if (typeof document !== 'undefined') {
   }
 
   async function save() {
+    const ph = FS.computeFormPhase({ filePath: form.filePath, durationSec: form.durationSec, fireAt: form.fireAt, contentItemGuid: form.contentItemGuid, linkChecked: form.linkChecked });
+    if (!ph.canSave) { $('formError').textContent = ph.reasons.join('  '); return; }   // never trust the disabled attribute alone
+    $('formError').textContent = '';
     const payload = buildAddPayload({ ...form, leadMin: parseInt($('evLead').value, 10) || 0, autoStop: $('evAutoStop').checked, repeatWeekly: $('evRepeat').checked, title: $('evTitle').value.trim() });
     await api.invoke('schedule:add', payload);
     hideForm();
@@ -808,7 +811,7 @@ if (typeof document !== 'undefined') {
     const el = document.createElement('div'); el.className = 'schedrow';
     const pill = F.statusPill(ev);
     const title = ev.title || ev.fileName || '(video)';
-    el.innerHTML = '<span class="pill ' + pill.kind + '">' + pill.label + '</span> <b>' + escapeHtml(title) + '</b> <span class="meta">' + F.fmtDateTime(ev.fireAt) + '</span> <span class="meta">' + escapeHtml(F.endsAround(ev)) + '</span>';
+    el.innerHTML = '<span class="pill ' + pill.kind + '">' + escapeHtml(pill.label) + '</span> <b>' + escapeHtml(title) + '</b> <span class="meta">' + F.fmtDateTime(ev.fireAt) + '</span> <span class="meta">' + escapeHtml(F.endsAround(ev)) + '</span>';
     if (upcoming) {
       if (['starting', 'preshow', 'playing'].includes(ev.status)) { const s = btn('Stop', () => api.invoke('schedule:stop', ev.id)); el.appendChild(s); }
       else { const r = btn('Remove', async () => { const res = await api.invoke('schedule:remove', ev.id); if (!res.ok) alert(res.error); }); el.appendChild(r); }
@@ -879,6 +882,7 @@ if (typeof document !== 'undefined') {
     // schedule
     renderList(await api.invoke('schedule:list'));
     api.onScheduleChanged((events) => renderList(events));
+    showView('main');            // assert the starting view — never rely on the HTML default
     resetForm();
   }
   document.addEventListener('DOMContentLoaded', init);

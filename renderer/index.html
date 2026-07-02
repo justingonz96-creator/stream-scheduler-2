@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stream Scheduler</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="topbar">
+    <div class="logo">Stream<span class="dot"> Scheduler</span></div>
+    <div class="spacer"></div>
+    <button id="btnGear" class="btn-ghost" title="Setup">Setup</button>
+    <button id="btnTheme" class="btn-ghost" title="Switch dark / light mode">Theme</button>
+  </header>
+
+  <div id="alertBar"></div>
+
+  <div id="liveBar" class="hidden">
+    <span class="livedot"></span>
+    <span class="livetext">LIVE — the stream is running</span>
+    <span class="spacer"></span>
+    <button id="btnStopNow">End stream now</button>
+    <span class="livesub" id="liveSub"></span>
+  </div>
+
+  <!-- ========= MAIN VIEW ========= -->
+  <div id="viewMain">
+    <div style="margin:18px 0; display:flex; justify-content:center;">
+      <button id="btnNew" class="btn-primary btn-big">+ Schedule a video</button>
+    </div>
+
+    <div class="card hidden" id="formCard">
+      <h3 id="formHeading" style="margin:0 0 10px;">Schedule a video</h3>
+
+      <!-- Step 1 — the spotlight -->
+      <div class="field" id="step1">
+        <div class="step1-full">
+          <label class="flabel">1. Which video should play?</label>
+          <div id="dropZone">
+            <button class="btn-primary" id="btnPickVideo" type="button">Choose the video…</button>
+            <div id="fileCheck" class="pickstatus"></div>
+          </div>
+          <div class="fhint">Pick the video file from this computer or a connected drive.</div>
+        </div>
+        <div class="step1-collapsed">
+          <span id="pickedSummary"></span>
+          <button class="btn-quiet btn-small" id="btnChangeVideo" type="button">change</button>
+        </div>
+      </div>
+
+      <div id="restOfForm">
+        <div class="field">
+          <label class="flabel">2. When should the video start?</label>
+          <div class="row2">
+            <div><input type="date" id="evDate"><div class="fhint">Date</div></div>
+            <div>
+              <div class="timepick">
+                <select id="evHour" aria-label="Hour"><option value="">Hour</option></select>
+                <span class="tp-colon">:</span>
+                <select id="evMin" aria-label="Minutes"><option value="">Min</option></select>
+                <select id="evAP" aria-label="AM or PM"><option value="">—</option><option value="AM">AM</option><option value="PM">PM</option></select>
+              </div>
+              <div class="fhint">Start time</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="field">
+          <label class="flabel">3. Start the stream early, with the slate up?</label>
+          <select id="evLead">
+            <option value="0">No — start right at the video time</option>
+            <option value="1">1 minute early</option><option value="2">2 minutes early</option>
+            <option value="5">5 minutes early</option><option value="10">10 minutes early</option>
+            <option value="15">15 minutes early</option><option value="20">20 minutes early</option>
+            <option value="30">30 minutes early</option>
+          </select>
+          <div class="fhint" id="leadHint"></div>
+        </div>
+
+        <div class="field">
+          <label class="flabel">4. When the video finishes…</label>
+          <label class="checkrow">
+            <input type="checkbox" id="evAutoStop" checked>
+            <span><span class="ck-title">End the stream automatically</span><br>
+            <span class="ck-sub">Recommended. If unchecked, the broadcast is left open until someone ends it by hand.</span></span>
+          </label>
+        </div>
+
+        <div class="field">
+          <label class="flabel">Content portal class link</label>
+          <input type="text" id="evPortalLink" placeholder="paste this class's link from the content portal (…/classes/…)">
+          <div style="margin-top:8px;"><button class="btn-quiet btn-small" id="btnEvPortalCheck" type="button">Check this class link</button></div>
+          <div class="pickstatus" id="evPortalStatus"></div>
+          <div class="fhint">Required — it tells the Scheduler which studio to stream to, and ends the broadcast when the video finishes.</div>
+        </div>
+
+        <div class="field">
+          <label class="checkrow">
+            <input type="checkbox" id="evRepeat">
+            <span><span class="ck-title">Repeat every week</span><br>
+            <span class="ck-sub">The slot returns each week and asks for that week's video — it never re-airs an old one.</span></span>
+          </label>
+        </div>
+
+        <div class="field">
+          <label class="flabel">Name for this event <span style="font-weight:400;color:var(--ink-soft)">(optional)</span></label>
+          <input type="text" id="evTitle" maxlength="60" placeholder="example: Friday Evening Ride">
+        </div>
+      </div>
+
+      <div class="form-error" id="formError"></div>
+      <div class="form-actions">
+        <button class="btn-primary btn-big" id="btnSave">✓ Schedule it</button>
+        <button class="btn-quiet" id="btnCancel">Cancel</button>
+      </div>
+    </div>
+
+    <h2 class="section">Schedule</h2>
+    <div id="upcomingList" class="sched"></div>
+    <details class="history"><summary>Past events</summary><div id="historyList" style="margin-top:6px;"></div></details>
+  </div>
+
+  <!-- ========= SETUP VIEW ========= -->
+  <div id="viewSetup" class="hidden">
+    <div class="card">
+      <h3 style="margin:0; font-size:var(--fs-5);">Setup for this computer</h3>
+      <p style="color:var(--ink-soft); font-size:var(--fs-2);" id="engineStatus">Checking the video engine…</p>
+
+      <div class="setup-step"><div class="setup-num">1</div><div class="setup-body">
+        <h3>The slate <span style="font-weight:400;color:var(--ink-soft)">(optional)</span></h3>
+        <p>What viewers see <b>before the video starts</b>: a picture, usually with waiting music.</p>
+        <div class="slate-row"><input type="text" id="setSlateImage" placeholder="no picture chosen yet" readonly>
+          <button class="btn-quiet" id="btnPickSlateImage" type="button">Choose…</button></div>
+        <div class="fhint" style="margin-bottom:10px;">The picture (PNG or JPG)</div>
+        <div class="slate-row"><input type="text" id="setSlateMusic" placeholder="no music chosen yet" readonly>
+          <button class="btn-quiet" id="btnPickSlateMusic" type="button">Choose…</button></div>
+        <div class="fhint" style="margin-bottom:10px;">The music (MP3) — loops. Leave empty for a silent slate.</div>
+        <select id="setFade">
+          <option value="500">Fade into the video: Quick (½ second)</option>
+          <option value="1000" selected>Fade into the video: Normal (1 second)</option>
+          <option value="2000">Fade into the video: Slow &amp; smooth (2 seconds)</option>
+        </select>
+      </div></div>
+
+      <div class="setup-step"><div class="setup-num">2</div><div class="setup-body">
+        <h3>Streaming quality</h3>
+        <p><b>Where to stream is automatic</b> — each video's class link tells the Scheduler which Echelon studio to broadcast to. Just pick the quality:</p>
+        <select id="setBitratePreset" style="margin-bottom:8px;">
+          <option value="2500">Low — saves bandwidth (~2500 kbps)</option>
+          <option value="4500">Standard (~4500 kbps)</option>
+          <option value="6000">High — best looking (~6000 kbps)</option>
+          <option value="custom">Custom…</option>
+        </select>
+        <input type="number" id="setBitrateCustom" placeholder="video bitrate in kbps" min="500" max="20000" style="display:none;">
+        <div class="fhint">Higher looks better but needs more upload speed. Takes effect on the next broadcast.</div>
+      </div></div>
+
+      <div class="setup-step"><div class="setup-num">3</div><div class="setup-body">
+        <h3>Content portal login</h3>
+        <p>The Scheduler signs in to find each class's studio and to end the broadcast when the video finishes. Required.</p>
+        <div class="field" style="margin-top:0;"><label class="flabel">Portal email</label>
+          <input type="email" id="setPortalEmail" placeholder="you@echelonfit.com"></div>
+        <div class="field"><label class="flabel">Portal password</label>
+          <input type="password" id="setPortalPassword" placeholder="your content portal password">
+          <div class="fhint">Stored only on this computer, in your operating system's secure keychain.</div></div>
+        <div class="field"><label class="flabel">Portal API key <span style="font-weight:400;color:var(--ink-soft)">(optional)</span></label>
+          <input type="text" id="setPortalApiKey" placeholder="leave blank to start"></div>
+        <div style="margin-top:16px;">
+          <button class="btn-quiet btn-small" id="btnPortalTest" type="button">Test login</button>
+          <div id="portalTestResult" class="pickstatus" style="margin-top:10px;"></div>
+        </div>
+      </div></div>
+
+      <div class="form-actions" style="margin-top:28px;">
+        <button class="btn-primary btn-big" id="btnSetupDone">Save &amp; finish</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="statusBar">
+    <span class="sb-item sb-clock" id="clockNow">…</span>
+  </div>
+</div>
+
+<script src="mockapi.js"></script>
+<script src="format.js"></script>
+<script src="formstate.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
