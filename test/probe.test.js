@@ -31,3 +31,14 @@ test('audio-less file → rejected with clear reason', async () => {
   assert.equal(r.ok, false);
   assert.match(r.error, /no sound/i);
 });
+
+test('unreadable duration → rejected before the audio check', async () => {
+  const { execFileSync } = require('node:child_process');
+  const { ffmpegPath } = require('../engine/ffmpeg');
+  const raw = path.join(FIX, 'raw.h264');
+  execFileSync(ffmpegPath(), ['-y','-f','lavfi','-i','testsrc2=size=320x240:rate=30:duration=1',
+    '-c:v','libx264','-preset','veryfast','-f','h264', raw]);
+  const r = await probeFile(raw);
+  assert.equal(r.ok, false);
+  assert.match(r.error, /length could not be read/i);
+});
