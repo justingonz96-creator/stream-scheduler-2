@@ -904,6 +904,197 @@ git add schedule/scheduler.js test/scheduler.test.js
 git commit -m "feat: scheduler state machine — go-live, verified start, retry/resume, weekly renewal, laws"
 ```
 
+#### Task 4 — review-mandated amendments (apply after Step 5)
+
+The whole-branch-grade review of this task found four reachable, plan-mandated defects. The fixes are all local to `schedule/scheduler.js` (+ harness/tests). Replace the named functions with the versions below and add a `redactSecrets` helper + the new tests. Then `npm test` → 83 tests, 0 fail.
+
+**(a) `redactSecrets` helper** — add inside the factory (near `endPortal`):
+```js
+  // The engine's failure reason can embed ffmpeg stderr, which on a connection
+  // error prints the full output URL — INCLUDING the stream key. Scrub it before
+  // anything reaches a log line or the persisted outcome (key-secrecy law).
+  function redactSecrets(text, target) {
+    let s = String(text == null ? '' : text);
+    if (target) {
+      if (target.server && target.key) { const u = joinRtmpUrl(target.server, target.key); if (u) s = s.split(u).join('***'); }
+      if (target.key) s = s.split(target.key).join('***');
+    }
+    return s;
+  }
+```
+
+**(b) `spawn`** — capture the instance in the listeners; guard the floating async handlers; wrap the sync one:
+```js
+  function spawn(ev, { leadSec, resumeOffsetSec, target, retried, resumeCount }) {
+    const s = settings.get();
+    const useSlate = leadSec > 0;
+    const bc = engineFactory({
+      videoPath: ev.filePath, vertical: !!target.vertical, bitrateKbps: s.videoBitrate, fps: 30,
+      leadSec, fadeSec: (s.fadeMs || 0) / 1000,
+      slateImage: useSlate ? s.slateImage : '', slateMusic: useSlate ? s.slateMusic : '',
+      resumeOffsetSec, outUrl: joinRtmpUrl(target.server, target.key),
+    });
+    active = { eventId: ev.id, broadcast: bc, target, sawPlaying: false, retried, resumeCount };
+    bc.on('playing', () => { try { onPlaying(ev.id, bc); } catch (e) { log('playing handler error: ' + ((e && e.message) || e)); } });
+    bc.on('ended', () => { onEnded(ev.id, bc).catch((e) => log('ended handler error: ' + ((e && e.message) || e))); });
+    bc.on('failed', (info) => { onFailed(ev.id, (info && info.reason) || 'unknown', bc).catch((e) => log('failed handler error: ' + ((e && e.message) || e))); });
+    try { bc.start(); }
+    catch (e) { onFailed(ev.id, (e && e.message) || 'the video engine could not start', bc).catch(() => {}); }
+  }
+```
+
+**(c) `onPlaying` / `onEnded` / `onFailed`** — add the `bc` param and the `active.broadcast !== bc` instance guard; redact reasons:
+```js
+  function onPlaying(id, bc) {
+    if (!active || active.eventId !== id || active.broadcast !== bc) return;
+    active.sawPlaying = true;
+    const ev = byId(id); if (!ev) return;
+    ev.status = now() >= ev.fireAt ? 'playing' : 'preshow';
+    persist();
+  }
+
+  async function onEnded(id, bc) {
+    if (!active || active.eventId !== id || active.broadcast !== bc) return;
+    const ev = byId(id); active = null;
+    if (!ev) return;
+    if (ev.autoStop) { await endPortal(ev); ev.outcome = 'Played ✓ and the stream ended'; }
+    else { ev.outcome = 'Played ✓ — video finished (portal broadcast left open, as requested)'; }
+    ev.status = 'done'; ev.doneAt = now();
+    renew(ev); persist();
+  }
+
+  async function onFailed(id, reason, bc) {
+    if (!active || active.eventId !== id || active.broadcast !== bc) return;
+    const ev = byId(id); if (!ev) { active = null; return; }
+    const { sawPlaying, retried, resumeCount, target, broadcast } = active;
+    const safeReason = redactSecrets(reason, target);
+    if (!sawPlaying) {
+      active = null;
+      if (!retried) {
+        log('start failed, retrying once: ' + safeReason);
+        spawn(ev, { leadSec: computeLeadSec(ev, now()), resumeOffsetSec: 0, target, retried: true, resumeCount });
+      } else { fail(ev, safeReason); }
+      return;
+    }
+    const offset = typeof broadcast.videoOffsetSec === 'function' ? broadcast.videoOffsetSec() : 0;
+    active = null;
+    if (now() >= plannedVideoEndAtMs(ev) - 1500) {
+      if (ev.autoStop) { await endPortal(ev); ev.outcome = 'Played ✓ and the stream ended'; }
+      else { ev.outcome = 'Played ✓ — video finished (portal broadcast left open, as requested)'; }
+      ev.status = 'done'; ev.doneAt = now(); renew(ev); persist();
+      return;
+    }
+    if (resumeCount >= MAX_RESUMES) {
+      await endPortal(ev);
+      ev.status = 'failed'; ev.outcome = 'The stream kept dropping and could not be recovered';
+      ev.doneAt = now(); renew(ev); persist();
+      return;
+    }
+    log('stream dropped, resuming at ' + offset + 's');
+    spawn(ev, { leadSec: 0, resumeOffsetSec: offset, target, retried: true, resumeCount: resumeCount + 1 });
+  }
+```
+
+**(d) `takeover`** — unlink `active` BEFORE the awaited portal call (kills the orphan race), keeping end-portal-before-stop:
+```js
+  async function takeover(prev) {
+    const bc = active && active.broadcast;
+    active = null;                                 // unlink FIRST — a late event from the outgoing engine can't resume-spawn
+    prev.status = 'done';
+    prev.outcome = 'Ended early — the next scheduled video started';
+    prev.doneAt = now();
+    if (prev.autoStop) await endPortal(prev);      // end-portal-before-stop
+    try { if (bc) bc.stop(); } catch {}
+    renew(prev); persist();
+  }
+```
+
+**(e) `goLive`** — guard a `streamTarget` rejection so a client bug can't strand the event at `starting`:
+```js
+  async function goLive(ev) {
+    ev.status = 'starting'; persist();
+    log('starting broadcast: ' + (ev.title || ev.fileName || ev.id));
+    let target;
+    try { target = await portal.streamTarget({ contentItemGuid: ev.contentItemGuid, scheduleGuid: ev.scheduleGuid }); }
+    catch (e) { fail(ev, 'the studio could not be reached: ' + ((e && e.message) || e)); return; }
+    if (!target || !target.ok) { fail(ev, (target && target.error) || 'no studio was returned by the portal'); return; }
+    spawn(ev, { leadSec: computeLeadSec(ev, now()), resumeOffsetSec: 0, target, retried: false, resumeCount: 0 });
+  }
+```
+
+**(f) Harness + new tests** — extend the harness to record logs and to fail persistence on demand, then add five tests:
+```js
+// in memStore: add a fail toggle
+function memStore(initial = []) {
+  let data = initial.map((e) => ({ ...e })); let willFail = false;
+  return { load: () => data.map((e) => ({ ...e })), save: (evs) => { if (willFail) throw new Error('disk full'); data = evs.map((e) => ({ ...e })); }, _fail: () => { willFail = true; } };
+}
+// in harness: capture logs + expose failSave (build the store first so we can ref it)
+//   const store = memStore(events); const logs = [];
+//   const sched = createScheduler({ store, portal, engineFactory, settings, now: () => clock, genId: () => 'gen' + (idc++), log: (m) => logs.push(m) });
+//   return { sched, spawned, ended, order, logs, setClock, getClock, failSave: () => store._fail() };
+
+test('instance guard: a late "playing" from a dead engine does not flip status', async () => {
+  const h = harness({ events: [liveEvent()] });
+  h.setClock(70000); await h.sched.tick();
+  h.spawned[0].emit('failed', { reason: 'start fail' });      // retry → spawned[1]
+  await new Promise((r) => setImmediate(r));
+  assert.equal(h.spawned.length, 2);
+  h.spawned[0].emit('playing');                                // dead instance emits late
+  assert.equal(h.sched.getEvents()[0].status, 'starting', 'dead engine playing must be ignored');
+});
+
+test('takeover: a late failure from the outgoing engine cannot orphan a resume engine', async () => {
+  const a = liveEvent({ id: 'A', fireAt: 100000, leadMs: 30000 });
+  const b = liveEvent({ id: 'B', fireAt: 160000, leadMs: 0, contentItemGuid: 'ci2', scheduleGuid: 'sg2' });
+  const h = harness({ events: [a, b] });
+  h.setClock(70000); await h.sched.tick();
+  h.spawned[0].emit('playing');
+  h.setClock(160000); await h.sched.tick();                   // takeover A, go live B
+  await new Promise((r) => setImmediate(r));
+  const n = h.spawned.length;
+  h.spawned[0].emit('failed', { reason: 'late drop' });       // A's dead engine fires late
+  await new Promise((r) => setImmediate(r));
+  assert.equal(h.spawned.length, n, 'a late failure from the taken-over engine must spawn nothing');
+  assert.equal(h.sched.getEvents().find((e) => e.id === 'A').status, 'done');
+});
+
+test('key redaction: a stream key in a failure reason never reaches outcome or logs', async () => {
+  const h = harness({ events: [liveEvent()] });      // target.key === 'KEY', server 'rtmps://h/app'
+  h.setClock(70000); await h.sched.tick();
+  h.spawned[0].emit('failed', { reason: 'rtmps://h/app/KEY: Input/output error' });
+  await new Promise((r) => setImmediate(r));          // retry
+  h.spawned[1].emit('failed', { reason: 'rtmps://h/app/KEY: Input/output error' });
+  await new Promise((r) => setImmediate(r));          // fail
+  const ev = h.sched.getEvents()[0];
+  assert.equal(ev.status, 'failed');
+  assert.ok(!ev.outcome.includes('KEY'), 'key must not be in the persisted outcome');
+  assert.ok(!h.logs.join('\n').includes('KEY'), 'key must not be in logs');
+});
+
+test('a store.save failure inside the async ended handler does not throw or reject unhandled', async () => {
+  const h = harness({ events: [liveEvent()] });
+  h.setClock(70000); await h.sched.tick();
+  h.spawned[0].emit('playing');
+  h.failSave();
+  assert.doesNotThrow(() => h.spawned[0].emit('ended'));
+  await new Promise((r) => setImmediate(r));           // rejection, if any, is swallowed by the handler's .catch
+});
+
+test('a store.save failure inside the sync playing handler does not throw', async () => {
+  const h = harness({ events: [liveEvent()] });
+  h.setClock(70000); await h.sched.tick();
+  h.failSave();
+  assert.doesNotThrow(() => h.spawned[0].emit('playing'));
+});
+```
+
+Commit the amendments:
+```bash
+git add schedule/scheduler.js test/scheduler.test.js
+git commit -m "fix: takeover orphan race, unhandled-rejection guards, key redaction, instance guard"
+```
+
 ---
 
 ### Task 5: `portal/link.js` + `app/ipc.js` — link parsing + the IPC handler map
