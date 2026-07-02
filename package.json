@@ -1,7 +1,7 @@
 {
   "name": "stream-scheduler-2",
-  "productName": "Stream Scheduler",
-  "version": "2.0.0-dev",
+  "productName": "Stream Scheduler 2",
+  "version": "2.0.0",
   "private": true,
   "main": "app/main.js",
   "scripts": {
@@ -10,9 +10,79 @@
     "fixtures": "bash scripts/make-fixtures.sh",
     "rehearsal": "node scripts/rehearsal.js",
     "rehearsal:resume": "node scripts/rehearsal-resume.js",
-    "rehearsal:brain": "node scripts/brain-rehearsal.js"
+    "rehearsal:brain": "node scripts/brain-rehearsal.js",
+    "dist:mac": "electron-builder --mac",
+    "dist:win": "electron-builder --win"
   },
   "devDependencies": {
-    "electron": "^43.0.0"
+    "electron": "^43.0.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.echelonfit.stream-scheduler2",
+    "productName": "Stream Scheduler 2",
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "files": [
+      "app/**",
+      "engine/**",
+      "portal/**",
+      "schedule/**",
+      "store/**",
+      "renderer/**",
+      "package.json"
+    ],
+    "asar": true,
+    "npmRebuild": false,
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
+      "category": "public.app-category.video",
+      "extraResources": [
+        {
+          "from": "resources/ffmpeg/mac-arm64",
+          "to": "ffmpeg/mac-arm64"
+        },
+        {
+          "from": "resources/ffmpeg/mac-x64",
+          "to": "ffmpeg/mac-x64"
+        }
+      ]
+    },
+    "dmg": {
+      "writeUpdateInfo": false
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "extraResources": [
+        {
+          "from": "resources/ffmpeg/win-x64",
+          "to": "ffmpeg/win-x64"
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false
+    }
   }
 }
