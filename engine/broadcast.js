@@ -1,7 +1,7 @@
 'use strict';
 const { EventEmitter } = require('node:events');
 const { spawn } = require('node:child_process');
-const { ffmpegPath } = require('./ffmpeg');
+const ffmpeg = require('./ffmpeg');
 const { buildBroadcastArgs, videoStartsAtSec } = require('./timeline');
 
 const VERIFY_AT_SEC = 0.5;   // out_time must pass this to count as "actually playing"
@@ -15,14 +15,29 @@ class Broadcast extends EventEmitter {
     this._playing = false;
     this._stopping = false;
     this._stderrTail = '';
+    this._stdoutBuf = '';
+    this._finalized = false;
+  }
+
+  _fail(reason) {
+    if (this._finalized || this._stopping) return;
+    this._finalized = true;
+    this.emit('failed', { reason });
   }
 
   start() {
     const args = buildBroadcastArgs(this.opts);
-    this._proc = spawn(ffmpegPath(), args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    this._proc = spawn(ffmpeg.ffmpegPath(), args, { stdio: ['ignore', 'pipe', 'pipe'] });
 
+    this._proc.on('error', (err) => {
+      this._fail('The broadcast could not start — the built-in video engine failed to launch. ' +
+        'Reinstall Stream Scheduler, or contact the admin. (' + err.message + ')');
+    });
     this._proc.stdout.on('data', (buf) => {          // -progress pipe:1 key=value lines
-      for (const line of String(buf).split('\n')) {
+      this._stdoutBuf += String(buf);
+      const lines = this._stdoutBuf.split('\n');
+      this._stdoutBuf = lines.pop();                  // keep the trailing partial line for the next chunk
+      for (const line of lines) {
         const m = /^out_time_us=(\d+)/.exec(line.trim());
         if (m) {
           this.outTimeSec = Number(m[1]) / 1e6;
@@ -38,17 +53,16 @@ class Broadcast extends EventEmitter {
       this._stderrTail = (this._stderrTail + String(buf)).slice(-2000);
     });
     this._proc.on('close', (code) => {
-      if (this._stopping) return;                     // deliberate stop: caller handles state
+      if (this._stopping || this._finalized) return;  // deliberate stop, or already failed via 'error'
       if (!this._playing) {
-        this.emit('failed', { reason:
-          'The broadcast could not start — the video (or slate) file could not be played. ' +
-          'Check the file and the network drive. (' + this._stderrTail.split('\n').slice(-2).join(' ').trim() + ')' });
+        this._fail('The broadcast could not start — the video (or slate) file could not be played. ' +
+          'Check the file and the network drive. (' + this._stderrTail.split('\n').slice(-2).join(' ').trim() + ')');
       } else if (code === 0) {
+        this._finalized = true;
         this.emit('ended');
       } else {
-        this.emit('failed', { reason:
-          'The broadcast stopped unexpectedly (connection or file problem). ' +
-          'It can be resumed. (' + this._stderrTail.split('\n').slice(-2).join(' ').trim() + ')' });
+        this._fail('The broadcast stopped unexpectedly (connection or file problem). ' +
+          'It can be resumed. (' + this._stderrTail.split('\n').slice(-2).join(' ').trim() + ')');
       }
     });
   }
@@ -60,6 +74,7 @@ class Broadcast extends EventEmitter {
 
   stop() {
     return new Promise((resolve) => {
+      if (this._stopping) { resolve(); return; }
       if (!this._proc || this._proc.exitCode !== null) { resolve(); return; }
       this._stopping = true;
       const killTimer = setTimeout(() => { try { this._proc.kill('SIGKILL'); } catch {} }, 3000);

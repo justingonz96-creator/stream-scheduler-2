@@ -38,3 +38,25 @@ test('stop(): clean kill, no failed event, offset math sane', async () => {
   assert.equal(failed, false, 'a deliberate stop is not a failure');
   assert.ok(off > 0.5 && off < 10, `offset ${off}`);
 });
+
+test('mid-broadcast crash after playing → failed (resumable), never ended', async () => {
+  const b = new Broadcast(short({ leadSec: 0, slateImage: null }));
+  let ended = false; b.on('ended', () => { ended = true; });
+  const failed = new Promise((res) => b.on('failed', res));
+  await new Promise((res) => { b.on('playing', res); b.start(); });
+  b._proc.kill('SIGKILL');                      // simulate a mid-broadcast death
+  const r = await failed;
+  assert.equal(ended, false, 'a crash is never a clean end');
+  assert.match(r.reason, /can be resumed/i);
+});
+
+test('spawn failure → failed with plain-English reason, no crash', async () => {
+  const ffmpeg = require('../engine/ffmpeg');
+  const orig = ffmpeg.ffmpegPath;
+  ffmpeg.ffmpegPath = () => '/nonexistent/no-such-ffmpeg';
+  try {
+    const b = new Broadcast(short({ leadSec: 0, slateImage: null }));
+    const r = await new Promise((res) => { b.on('failed', res); b.start(); });
+    assert.match(r.reason, /failed to launch/i);
+  } finally { ffmpeg.ffmpegPath = orig; }
+});
