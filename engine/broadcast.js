@@ -6,6 +6,10 @@ const { buildBroadcastArgs, videoStartsAtSec } = require('./timeline');
 
 const VERIFY_AT_SEC = 0.5;   // out_time must pass this to count as "actually playing"
 
+/* One broadcast attempt = one Broadcast instance. start() may be called once; to
+   retry a failed start or resume after a crash, create a NEW Broadcast (passing
+   resumeOffsetSec from the old instance's videoOffsetSec()). The rehearsal
+   harnesses model this pattern. */
 class Broadcast extends EventEmitter {
   constructor(opts) {
     super();
@@ -17,6 +21,7 @@ class Broadcast extends EventEmitter {
     this._stderrTail = '';
     this._stdoutBuf = '';
     this._finalized = false;
+    this._startTimer = null;
   }
 
   _fail(reason) {
@@ -26,6 +31,8 @@ class Broadcast extends EventEmitter {
   }
 
   start() {
+    if (this._proc) throw new Error('Broadcast is one-shot: create a new Broadcast to retry or resume.');
+
     const args = buildBroadcastArgs(this.opts);
     this._proc = spawn(ffmpeg.ffmpegPath(), args, { stdio: ['ignore', 'pipe', 'pipe'] });
 
@@ -43,6 +50,7 @@ class Broadcast extends EventEmitter {
           this.outTimeSec = Number(m[1]) / 1e6;
           if (!this._playing && this.outTimeSec >= VERIFY_AT_SEC) {
             this._playing = true;
+            clearTimeout(this._startTimer);
             this.emit('playing');
           }
           this.emit('progress', { outTimeSec: this.outTimeSec });
@@ -53,6 +61,7 @@ class Broadcast extends EventEmitter {
       this._stderrTail = (this._stderrTail + String(buf)).slice(-2000);
     });
     this._proc.on('close', (code) => {
+      clearTimeout(this._startTimer);
       if (this._stopping || this._finalized) return;  // deliberate stop, or already failed via 'error'
       if (!this._playing) {
         this._fail('The broadcast could not start — the video (or slate) file could not be played. ' +
@@ -65,6 +74,17 @@ class Broadcast extends EventEmitter {
           'It can be resumed. (' + this._stderrTail.split('\n').slice(-2).join(' ').trim() + ')');
       }
     });
+
+    // Start deadline: a source that hangs without exiting (stalled network read,
+    // unresponsive ingest) must still report. If media time hasn't been confirmed
+    // advancing within the deadline, fail plainly and kill the encode.
+    const deadlineMs = this.opts.startTimeoutMs == null ? 30000 : this.opts.startTimeoutMs;
+    this._startTimer = setTimeout(() => {
+      if (this._playing || this._finalized || this._stopping) return;
+      this._fail('The broadcast did not start within ' + Math.round(deadlineMs / 1000) +
+        ' seconds — check the video file and the network drive.');
+      try { this._proc.kill('SIGKILL'); } catch {}
+    }, deadlineMs);
   }
 
   videoOffsetSec() {
@@ -73,6 +93,7 @@ class Broadcast extends EventEmitter {
   }
 
   stop() {
+    clearTimeout(this._startTimer);
     return new Promise((resolve) => {
       if (this._stopping) { resolve(); return; }
       if (!this._proc || this._proc.exitCode !== null) { resolve(); return; }

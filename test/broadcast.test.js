@@ -60,3 +60,18 @@ test('spawn failure → failed with plain-English reason, no crash', async () =>
     assert.match(r.reason, /failed to launch/i);
   } finally { ffmpeg.ffmpegPath = orig; }
 });
+
+test('start() is one-shot — reuse throws instead of spawning a zombie', async () => {
+  const b = new Broadcast(short({ videoPath: path.join(FIX, 'missing.mp4'), leadSec: 0, slateImage: null }));
+  await new Promise((res) => { b.on('failed', res); b.start(); });
+  assert.throws(() => b.start(), /one-shot/i);
+});
+
+test('start deadline: a source that never reaches playing fails plainly', async () => {
+  // 1ms deadline fires long before ffmpeg's first progress tick — deterministic.
+  const b = new Broadcast(short({ leadSec: 0, slateImage: null, startTimeoutMs: 1 }));
+  let played = false; b.on('playing', () => { played = true; });
+  const r = await new Promise((res) => { b.on('failed', res); b.start(); });
+  assert.equal(played, false);
+  assert.match(r.reason, /did not start within/i);
+});
