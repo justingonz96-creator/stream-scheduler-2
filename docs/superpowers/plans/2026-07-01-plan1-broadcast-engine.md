@@ -288,7 +288,7 @@ git commit -m "feat: generated media fixtures for engine tests"
 
 **Interfaces:**
 - Consumes: `engine/ffmpeg.js` → `ffprobePath()`.
-- Produces: `probeFile(filePath): Promise<{ok:true, durationSec:number, width:number, height:number, hasAudio:boolean} | {ok:false, error:string}>`. Errors are plain-English ("This video file could not be opened…", "This video has no sound…"). A video with no audio stream is `ok:false` per spec (§5: caught at scheduling, engine assumes audio).
+- Produces: `probeFile(filePath): Promise<{ok:true, durationSec:number, width:number, height:number, hasAudio:boolean} | {ok:false, error:string}>`. Errors are plain-English ("This video file could not be opened…", "This video has no sound…"). A video with no audio stream is `ok:false` per spec (§5: caught at scheduling, engine assumes audio). A file whose container reports no readable duration is also `ok:false` ("length could not be read") — `ok:true` guarantees `durationSec > 0`, so scheduling math can trust it.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -358,11 +358,16 @@ function probeFile(filePath) {
         const v = (info.streams || []).find(s => s.codec_type === 'video');
         const a = (info.streams || []).find(s => s.codec_type === 'audio');
         if (!v) { resolve({ ok: false, error: 'This file has no video in it.' }); return; }
+        // A readable length is required: scheduling and the countdown depend on it,
+        // and an unreadable length usually means a damaged/unfinished file.
+        const durationSec = parseFloat(info.format?.duration || '0') || 0;
+        if (durationSec <= 0) { resolve({ ok: false, error:
+          "This video's length could not be read — the file may be damaged or still copying. Try playing it first." }); return; }
         if (!a) { resolve({ ok: false, error:
           'This video has no sound. Broadcasts need a video with an audio track.' }); return; }
         resolve({
           ok: true,
-          durationSec: parseFloat(info.format?.duration || v.duration || '0') || 0,
+          durationSec,
           width: v.width || 0, height: v.height || 0,
           hasAudio: true,
         });
@@ -552,6 +557,7 @@ git commit -m "feat: broadcast timeline builder (slate+mp3 -> xfade -> video, on
 - Consumes: `buildBroadcastArgs`, `videoStartsAtSec` (Task 5); `ffmpegPath()` (Task 2).
 - Produces: `class Broadcast extends EventEmitter` — `new Broadcast(opts)` (same opts as `buildBroadcastArgs`), `.start()`, `.stop(): Promise<void>` (SIGTERM, SIGKILL after 3 s), `.outTimeSec` (media time in the output timeline, parsed from ffmpeg `-progress`), `.videoOffsetSec()` (position **within the class video** = `max(0, outTimeSec - videoStartsAtSec(opts)) + resumeOffsetSec` — what a resume passes as the next `resumeOffsetSec`). Events: `'playing'` (verified start: out_time advancing past 0.5 s), `'ended'` (exit 0), `'failed'` (`{reason}` plain-English: never after a clean stop), `'progress'` (`{outTimeSec}`).
 - **Verified-start law (spec §5):** if the process exits — or out_time never advances — before the 0.5 s threshold, that is `'failed'` with `"The broadcast could not start…"`, never `'ended'`.
+- **Review amendments (task-review findings, binding):** (a) the spawned child MUST have an `'error'` listener — a spawn failure (missing/broken ffmpeg) emits `'failed'` with a plain-English reason, never an unhandled-event crash; broadcast.js calls `ffmpeg.ffmpegPath()` through the module namespace so tests can stub it. (b) `'failed'`/`'ended'` are emitted at most once total (a `_finalized` guard spans the `'error'` and `'close'` handlers). (c) stdout `-progress` parsing buffers a trailing partial line across `data` chunks. (d) `stop()` is re-entry-safe. (e) Tests additionally cover: post-`'playing'` crash → `'failed'` (resumable reason, never `'ended'`), and spawn-failure → `'failed'`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -834,7 +840,8 @@ git commit -m "feat: automated dress rehearsal vs local RTMP (fade, pacing, audi
 
 **Interfaces:**
 - Consumes: `Broadcast.videoOffsetSec()` (Task 6) — the value a supervisor passes as `resumeOffsetSec` when restarting a dead broadcast (spec §5 reconnect/resume; Plan 3's scheduler will do this automatically).
-- Produces: `npm run rehearsal:resume` — starts a broadcast, kills the encode mid-video (simulating a network death), restarts with the captured offset, records both segments, and verifies the second segment's length ≈ what remained ±2 s. Exit 0 = pass.
+- Produces: `npm run rehearsal:resume` — starts a broadcast, kills the encode mid-video (simulating a network death), restarts with the captured offset, records both segments, and verifies the resume. Exit 0 = pass.
+- **Review amendment (binding):** duration alone cannot distinguish a correct resume from a from-zero restart once recorder-side capture loss (~4 s) exceeds the offset — so the harness uses a **two-color fixture generated in-harness** (10 s green → 10 s blue + sine audio), kills during green, and adds a third check: a frame sampled 3 s into the resumed recording must be **BLUE** (a correct seek lands in/near blue; a from-zero restart shows green there, margin ≥2 s across measured attach-gap variance). The length check stays (evidence-backed <5 s tolerance) as a sanity bound; the color check is the discriminating proof.
 
 - [ ] **Step 1: Write the harness**
 
