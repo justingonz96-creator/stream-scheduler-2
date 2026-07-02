@@ -22,8 +22,8 @@ function parseContentItem(data) {
       stationGuid: cs.guid ?? null,
       stationName: cs.name ?? null,
       type: s.type ?? null,
-      start: av.start,
-      end: av.end,
+      start: av.start ?? null,   // null (not undefined): the 1.x contract — undefined keys
+      end: av.end ?? null,       // vanish under JSON.stringify (schedule.json, logs, IPC)
     });
   }
   return { occurrences, medium };

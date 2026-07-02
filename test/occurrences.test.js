@@ -64,3 +64,17 @@ test('isVertical: reflect (any case) yes; everything else no', () => {
   assert.equal(isVertical(null), false);
   assert.equal(isVertical(undefined), false);
 });
+
+test('parseContentItem: missing available → start/end are null and SURVIVE JSON round-trip', () => {
+  const parsed = parseContentItem({ schedule: [{ guid: 'g1', controlStation: { guid: 's1' } }] });
+  assert.equal(parsed.occurrences[0].start, null);
+  assert.equal(parsed.occurrences[0].end, null);
+  const round = JSON.parse(JSON.stringify(parsed.occurrences[0]));
+  assert.ok('start' in round && 'end' in round, 'keys must survive serialization (1.x contract)');
+});
+
+test('pickOccurrence: end present but 0 falls back to start+14400 (|| semantics are law)', () => {
+  const NOW = 5000;
+  const o = { scheduleGuid: 'z', stationGuid: 'Z', start: 1000, end: 0 };   // end 0 → default span applies
+  assert.equal(pickOccurrence([o], NOW).scheduleGuid, 'z');                 // in window only via the default span
+});
