@@ -18,7 +18,7 @@ function fakeEngine(offset = 5) {
   e.videoOffsetSec = () => offset;
   return e;
 }
-function harness({ events = [], target = { ok: true, server: 'rtmps://h/app', key: 'KEY', stationName: 'S', vertical: false }, offset = 5 } = {}) {
+function harness({ events = [], target = { ok: true, server: 'rtmps://h/app', key: 'KEY', stationName: 'S', vertical: false }, offset = 5, onEndBroadcast = null } = {}) {
   const spawned = [];
   const ended = [];
   const order = [];   // records 'end' (portal) and 'stop' (engine) call ordering
@@ -29,7 +29,7 @@ function harness({ events = [], target = { ok: true, server: 'rtmps://h/app', ke
   };
   const portal = {
     streamTarget: async () => (typeof target === 'function' ? target() : target),
-    endBroadcast: async (a) => { ended.push(a); order.push('end'); return { ok: true }; },
+    endBroadcast: async (a) => { ended.push(a); order.push('end'); if (onEndBroadcast) onEndBroadcast(); return { ok: true }; },
   };
   const settings = { get: () => ({ slateImage: 'slate.png', slateMusic: 'm.mp3', fadeMs: 1000, videoBitrate: 6000 }) };
   let clock = 0;
@@ -226,18 +226,17 @@ test('instance guard: a late "playing" from a dead engine does not flip status',
   assert.equal(h.sched.getEvents()[0].status, 'starting', 'dead engine playing must be ignored');
 });
 
-test('takeover: a late failure from the outgoing engine cannot orphan a resume engine', async () => {
+test('takeover: a failure DURING the portal-end await cannot orphan a resume engine', async () => {
+  let h;
   const a = liveEvent({ id: 'A', fireAt: 100000, leadMs: 30000 });
   const b = liveEvent({ id: 'B', fireAt: 160000, leadMs: 0, contentItemGuid: 'ci2', scheduleGuid: 'sg2' });
-  const h = harness({ events: [a, b] });
+  h = harness({ events: [a, b], offset: 42, onEndBroadcast: () => { if (h.spawned[0]) h.spawned[0].emit('failed', { reason: 'drop during end' }); } });
   h.setClock(70000); await h.sched.tick();
-  h.spawned[0].emit('playing');
-  h.setClock(160000); await h.sched.tick();                   // takeover A, go live B
+  h.spawned[0].emit('playing');                 // A live
+  h.setClock(160000); await h.sched.tick();      // takeover A (failure injected mid-await), then go live B
   await new Promise((r) => setImmediate(r));
-  const n = h.spawned.length;
-  h.spawned[0].emit('failed', { reason: 'late drop' });       // A's dead engine fires late
-  await new Promise((r) => setImmediate(r));
-  assert.equal(h.spawned.length, n, 'a late failure from the taken-over engine must spawn nothing');
+  assert.equal(h.spawned.length, 2, 'no orphaned resume engine for the taken-over event');
+  assert.equal(h.spawned[1].opts.resumeOffsetSec, 0, 'the 2nd engine is B fresh, not an A-resume (which would carry offset 42)');
   assert.equal(h.sched.getEvents().find((e) => e.id === 'A').status, 'done');
 });
 
