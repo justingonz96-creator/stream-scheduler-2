@@ -120,3 +120,30 @@ test('endBroadcast: pasted scheduleGuid pins the exact occurrence; nothing found
   assert.equal(re.ok, false);
   assert.match(re.error, /no live broadcast was found to end/i);
 });
+
+test('no-argument calls degrade to {ok:false}, never throw (never-throws law)', async () => {
+  const c = createPortalClient({ getConfig, transport: fakeTransport({ ...AUTH_OK }), now: () => NOW });
+  const a = await c.checkClassLink();
+  assert.equal(a.ok, false); assert.match(a.error, /no class link/i);
+  const b = await c.streamTarget();
+  assert.equal(b.ok, false); assert.match(b.error, /no class link/i);
+  const d = await c.endBroadcast();
+  assert.equal(d.ok, false); assert.match(d.error, /no live broadcast was found to end/i);
+});
+
+test('failure paths never leak the key either (station missing from the list)', async () => {
+  const logs = [];
+  // The class resolves to station st-9 (absent), while the station list still
+  // carries other stations WITH keys — a leak here would surface them.
+  const routes = {
+    ...AUTH_OK,
+    'GET /content/items/': { json: ITEM('standard', [{ guid: 'sg-9', controlStation: { guid: 'st-9', name: 'Ghost' }, type: 'live', available: { start: NOW - 60, end: NOW + 3600 } }]) },
+    'GET /control-stations': { json: STATIONS },
+  };
+  const c = createPortalClient({ getConfig, transport: fakeTransport(routes), log: (m) => logs.push(m), now: () => NOW });
+  const r = await c.streamTarget({ contentItemGuid: 'ci-9' });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /studio for this class was not found/i);
+  const everything = logs.join('\n') + JSON.stringify(r);
+  assert.ok(!everything.includes('KEY-ONE') && !everything.includes('KEY-TWO'), 'no key may leak on failure paths');
+});
