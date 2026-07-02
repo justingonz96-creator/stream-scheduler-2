@@ -10,6 +10,7 @@ const { createTransport } = require('../portal/http');
 const { createPortalClient } = require('../portal/client');
 const { createScheduler } = require('../schedule/scheduler');
 const { createIpcHandlers } = require('./ipc');
+const { checkForUpdate } = require('../store/update-check');
 const ffmpeg = require('../engine/ffmpeg');
 const probe = require('../engine/probe');
 const { Broadcast } = require('../engine/broadcast');
@@ -55,7 +56,8 @@ if (process.argv.includes('--selfcheck')) {
       genId: () => 'ev' + Date.now() + '-' + (idc++),
       log: (m) => console.log('[sched] ' + m),
     });
-    const handlers = createIpcHandlers({ settings, secrets, portal, scheduler, probe, ffmpeg });
+    const updates = { check: () => checkForUpdate({ currentVersion: app.getVersion(), fetchImpl: fetch }) };
+    const handlers = createIpcHandlers({ settings, secrets, portal, scheduler, probe, ffmpeg, updates });
     for (const [channel, fn] of Object.entries(handlers)) {
       ipcMain.handle(channel, (_e, payload) => fn(payload));
     }

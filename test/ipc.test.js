@@ -34,6 +34,7 @@ function handlers(over = {}) {
     },
     probe: { probeFile: async (p) => ({ ok: true, durationSec: 10, width: 1920, height: 1080, _p: p }) },
     ffmpeg: { selfCheck: async () => ({ ok: true, version: 'x' }) },
+    updates: { check: async () => ({ hasUpdate: false }) },
   };
   return { h: createIpcHandlers({ ...base, ...over }), calls };
 }
@@ -44,6 +45,7 @@ test('handler map covers exactly the expected channels', () => {
     'engine:selfCheck', 'portal:checkLink', 'portal:testLogin', 'probe:file',
     'schedule:add', 'schedule:list', 'schedule:remove', 'schedule:stop',
     'secret:hasPassword', 'secret:setPassword', 'settings:get', 'settings:save',
+    'update:check',
   ].sort());
 });
 

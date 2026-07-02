@@ -33,6 +33,7 @@ function createMockApi(seed = {}) {
       case 'schedule:add': { const ev = Object.assign({ id: 'mock' + (n++), status: 'pending', outcome: '', doneAt: 0 }, payload); events.push(ev); emit(); return { ...ev }; }
       case 'schedule:remove': { events = events.filter((e) => e.id !== payload); emit(); return { ok: true }; }
       case 'schedule:stop': return { ok: true };
+      case 'update:check': return { hasUpdate: false };
       default: return { ok: false, error: 'unknown channel: ' + channel };
     }
   }

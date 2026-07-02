@@ -134,6 +134,11 @@ if (typeof document !== 'undefined') {
     const chk = await api.invoke('engine:selfCheck');
     if (!chk.ok) { $('alertBar').textContent = '⚠ The video engine isn\'t ready: ' + (chk.error || '') ; $('alertBar').className = 'alert bad'; }
     $('engineStatus').textContent = chk.ok ? ('Video engine ready — ' + (chk.version || 'bundled FFmpeg')) : ('Video engine problem: ' + (chk.error || ''));
+    // update notice (spec §8): silent no-op on any failure, never blocks startup
+    try {
+      const upd = await api.invoke('update:check');
+      if (upd && upd.hasUpdate) { $('alertBar').textContent = 'A newer version (v' + upd.latestVersion + ') is available — ask the admin to update this computer.'; $('alertBar').className = 'alert warn'; }
+    } catch {}
     // wire buttons
     $('btnNew').onclick = showForm; $('btnCancel').onclick = hideForm;
     $('btnPickVideo').onclick = pickVideo; $('btnChangeVideo').onclick = () => { form.filePath = ''; form.durationSec = 0; $('fileCheck').textContent = ''; applyPhase(); };
