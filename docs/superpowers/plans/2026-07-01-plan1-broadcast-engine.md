@@ -116,7 +116,7 @@ git commit -m "feat: Electron scaffold with single-instance lock"
 - Test: `test/ffmpeg.test.js`
 
 **Interfaces:**
-- Produces: `require('../engine/ffmpeg')` → `{ ffmpegPath(): string, ffprobePath(): string, selfCheck(): Promise<{ok:boolean, version:string, error?:string}> }`. Resolution order: bundled `resources/ffmpeg/<platform>/` → system (`/opt/homebrew/bin`, `/usr/local/bin`, PATH). Throws a plain-English `Error('FFmpeg is missing …')` if none found.
+- Produces: `require('../engine/ffmpeg')` → `{ ffmpegPath(): string, ffprobePath(): string, selfCheck(): Promise<{ok:boolean, version:string, error?:string}> }`. Resolution order: bundled `resources/ffmpeg/<platform>/` → system (`/opt/homebrew/bin`, `/usr/local/bin`, PATH). **Contract: the path getters never throw** (worst case they return the bare tool name for PATH resolution); `selfCheck()` is the authoritative gate and resolves `{ok:false, error:<plain-English>}` when no runnable FFmpeg exists. Callers spawn via these paths and surface failures through their own error handling; the packaged app runs `selfCheck()` at startup (Plan 4).
 
 - [ ] **Step 1: Write the fetch script**
 
