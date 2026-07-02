@@ -1,0 +1,6 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "renderer-preview", "runtimeExecutable": "npx", "runtimeArgs": ["--yes", "http-server", "renderer", "-p", "4599", "-c-1"], "port": 4599 }
+  ]
+}

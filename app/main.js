@@ -1,6 +1,6 @@
 'use strict';
 const path = require('node:path');
-const { app, BrowserWindow, ipcMain, safeStorage } = require('electron');
+const { app, BrowserWindow, ipcMain, safeStorage, dialog } = require('electron');
 const { appDataDir } = require('../store/appdata');
 const { createSettingsStore, buildPortalConfig } = require('../store/settings');
 const { createScheduleStore } = require('../store/schedule-store');
@@ -16,7 +16,7 @@ const { Broadcast } = require('../engine/broadcast');
 
 // Single instance: a second launch focuses the existing window (spec §4).
 const gotLock = app.requestSingleInstanceLock();
-if (!gotLock) app.quit();
+if (!gotLock) { app.quit(); return; }
 
 let win = null;
 function createWindow() {
@@ -25,10 +25,10 @@ function createWindow() {
     title: 'Stream Scheduler 2.0',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true, nodeIntegration: false, sandbox: false,
+      contextIsolation: true, nodeIntegration: false,
     },
   });
-  win.loadFile('app/index.html');
+  win.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
 
   const dir = appDataDir();
   const settings = createSettingsStore({ file: path.join(dir, 'settings.json') });
@@ -50,6 +50,16 @@ function createWindow() {
   for (const [channel, fn] of Object.entries(handlers)) {
     ipcMain.handle(channel, (_e, payload) => fn(payload));
   }
+  const FILTERS = {
+    video: [{ name: 'Video', extensions: ['mp4', 'mov', 'mkv', 'm4v', 'avi'] }],
+    image: [{ name: 'Image', extensions: ['png', 'jpg', 'jpeg'] }],
+    audio: [{ name: 'Audio', extensions: ['mp3', 'm4a', 'wav'] }],
+  };
+  ipcMain.handle('dialog:openFile', async (_e, payload) => {
+    const kind = (payload && payload.kind) || 'video';
+    const res = await dialog.showOpenDialog(win, { properties: ['openFile'], filters: FILTERS[kind] || FILTERS.video });
+    return (res.canceled || !res.filePaths.length) ? '' : res.filePaths[0];
+  });
   scheduler.onChanged((events) => { if (!win.isDestroyed()) win.webContents.send('schedule:changed', events); });
   scheduler.start();
   ffmpeg.selfCheck().then((r) => { if (!win.isDestroyed()) win.webContents.send('engine:selfCheck', r); });
