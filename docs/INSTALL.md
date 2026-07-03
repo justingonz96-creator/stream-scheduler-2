@@ -38,7 +38,7 @@ technical background needed — just follow the numbered steps.
 The first time you open the app (Mac or Windows), it will ask you to set a
 few things up:
 
-1. Open the **Setup** screen (it should open automatically the first time).
+1. Click the **Setup** button in the top-right corner of the app.
 2. Pick the **slate picture** — the image shown on screen before the class
    starts.
 3. Pick the **waiting music** — the music that plays under the slate

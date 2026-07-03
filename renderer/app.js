@@ -134,12 +134,12 @@ if (typeof document !== 'undefined') {
     const chk = await api.invoke('engine:selfCheck');
     if (!chk.ok) { $('alertBar').textContent = '⚠ The video engine isn\'t ready: ' + (chk.error || '') ; $('alertBar').className = 'alert bad'; }
     $('engineStatus').textContent = chk.ok ? ('Video engine ready — ' + (chk.version || 'bundled FFmpeg')) : ('Video engine problem: ' + (chk.error || ''));
-    // update notice (spec §8): silent no-op on any failure, never blocks startup
-    try {
-      const upd = await api.invoke('update:check');
+    // update notice (spec §8): silent no-op on any failure — fire-and-forget, so a
+    // firewalled network can never stall the button wiring below.
+    api.invoke('update:check').then((upd) => {
       // Never clobber a more important engine-failure alert with the update notice.
       if (upd && upd.hasUpdate && $('alertBar').className !== 'alert bad') { $('alertBar').textContent = 'A newer version (v' + upd.latestVersion + ') is available — ask the admin to update this computer.'; $('alertBar').className = 'alert warn'; }
-    } catch {}
+    }).catch(() => {});
     // wire buttons
     $('btnNew').onclick = showForm; $('btnCancel').onclick = hideForm;
     $('btnPickVideo').onclick = pickVideo; $('btnChangeVideo').onclick = () => { form.filePath = ''; form.durationSec = 0; $('fileCheck').textContent = ''; applyPhase(); };

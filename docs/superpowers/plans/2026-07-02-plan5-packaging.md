@@ -230,11 +230,10 @@ module.exports = { checkForUpdate };
 ```
 Wiring: `app/ipc.js` — `createIpcHandlers({ ..., updates })` + entry `'update:check': async () => updates.check()`. `app/preload.js` — add `'update:check'` to ALLOWED. `renderer/mockapi.js` — `case 'update:check': return { hasUpdate: false };`. `app/main.js` — `const { checkForUpdate } = require('../store/update-check');` and pass `updates: { check: () => checkForUpdate({ currentVersion: app.getVersion(), fetchImpl: fetch }) }`. `renderer/app.js` — in `init()` after the selfCheck block:
 ```js
-    try {
-      const upd = await api.invoke('update:check');
+    api.invoke('update:check').then((upd) => {   // fire-and-forget: a firewalled network must never stall the UI wiring
       // Never clobber a more important engine-failure alert with the update notice.
       if (upd && upd.hasUpdate && $('alertBar').className !== 'alert bad') { $('alertBar').textContent = 'A newer version (v' + upd.latestVersion + ') is available — ask the admin to update this computer.'; $('alertBar').className = 'alert warn'; }
-    } catch {}
+    }).catch(() => {});
 ```
 
 - [ ] **Step 4: Run tests to verify they pass** — `node --test test/update-check.test.js test/ipc.test.js` → all pass.
