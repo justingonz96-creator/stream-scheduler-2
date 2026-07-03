@@ -11,7 +11,10 @@ const EXT = process.platform === 'win32' ? '.exe' : '';
 
 function resolveTool(tool) {
   const cands = [
-    path.join(__dirname, '..', 'resources', 'ffmpeg', PLATFORM_DIR, tool + EXT),
+    // Packaged app: electron-builder's extraResources puts the binaries at
+    // <resourcesPath>/ffmpeg/<platform>/ — OUTSIDE the asar, so they can execute.
+    ...(process.resourcesPath ? [path.join(process.resourcesPath, 'ffmpeg', PLATFORM_DIR, tool + EXT)] : []),
+    path.join(__dirname, '..', 'resources', 'ffmpeg', PLATFORM_DIR, tool + EXT),   // dev checkout
     `/opt/homebrew/bin/${tool}`,
     `/usr/local/bin/${tool}`,
     tool, // PATH fallback

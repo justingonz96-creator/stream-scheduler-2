@@ -4,7 +4,7 @@
 // ipcMain.handle registration and the push channel (schedule:changed).
 const { parsePortalLink } = require('../portal/link');
 
-function createIpcHandlers({ settings, secrets, portal, scheduler, probe, ffmpeg }) {
+function createIpcHandlers({ settings, secrets, portal, scheduler, probe, ffmpeg, updates }) {
   return {
     'settings:get': async () => settings.get(),
     'settings:save': async (patch) => settings.save(patch || {}),
@@ -29,6 +29,8 @@ function createIpcHandlers({ settings, secrets, portal, scheduler, probe, ffmpeg
     'schedule:add': async (ev) => scheduler.addEvent(ev || {}),
     'schedule:remove': async (id) => scheduler.removeEvent(String(id || '')),
     'schedule:stop': async (id) => scheduler.stopActive(String(id || '')),
+
+    'update:check': async () => updates.check(),
   };
 }
 

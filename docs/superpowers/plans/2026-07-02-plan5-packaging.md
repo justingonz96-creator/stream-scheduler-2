@@ -230,10 +230,10 @@ module.exports = { checkForUpdate };
 ```
 Wiring: `app/ipc.js` — `createIpcHandlers({ ..., updates })` + entry `'update:check': async () => updates.check()`. `app/preload.js` — add `'update:check'` to ALLOWED. `renderer/mockapi.js` — `case 'update:check': return { hasUpdate: false };`. `app/main.js` — `const { checkForUpdate } = require('../store/update-check');` and pass `updates: { check: () => checkForUpdate({ currentVersion: app.getVersion(), fetchImpl: fetch }) }`. `renderer/app.js` — in `init()` after the selfCheck block:
 ```js
-    try {
-      const upd = await api.invoke('update:check');
-      if (upd && upd.hasUpdate) { $('alertBar').textContent = 'A newer version (v' + upd.latestVersion + ') is available — ask the admin to update this computer.'; $('alertBar').className = 'alert warn'; }
-    } catch {}
+    api.invoke('update:check').then((upd) => {   // fire-and-forget: a firewalled network must never stall the UI wiring
+      // Never clobber a more important engine-failure alert with the update notice.
+      if (upd && upd.hasUpdate && $('alertBar').className !== 'alert bad') { $('alertBar').textContent = 'A newer version (v' + upd.latestVersion + ') is available — ask the admin to update this computer.'; $('alertBar').className = 'alert warn'; }
+    }).catch(() => {});
 ```
 
 - [ ] **Step 4: Run tests to verify they pass** — `node --test test/update-check.test.js test/ipc.test.js` → all pass.
@@ -270,6 +270,7 @@ Run: `npm install --save-dev electron-builder` (devDependency only; verify `depe
   "mac": {
     "target": [{ "target": "dmg", "arch": ["universal"] }, { "target": "zip", "arch": ["universal"] }],
     "category": "public.app-category.video",
+    "x64ArchFiles": "Contents/Resources/ffmpeg/**",
     "extraResources": [
       { "from": "resources/ffmpeg/mac-arm64", "to": "ffmpeg/mac-arm64" },
       { "from": "resources/ffmpeg/mac-x64", "to": "ffmpeg/mac-x64" }
@@ -283,7 +284,7 @@ Run: `npm install --save-dev electron-builder` (devDependency only; verify `depe
   "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true, "perMachine": false }
 }
 ```
-Notes: NO `mergeASARs`-breaking native deps exist (zero runtime deps), so the universal merge is safe; both mac arch dirs ship so `process.arch` picks at runtime (Task 1 resolver). No signing config (unsigned by decision). No `publish` block (releases are uploaded manually with user consent).
+Notes: `x64ArchFiles` declares the bundled ffmpeg dirs as intentionally single-arch (both arch dirs ship in both slices; the universal merge otherwise refuses identical Mach-O files). NO `mergeASARs`-breaking native deps exist (zero runtime deps), so the universal merge is safe; both mac arch dirs ship so `process.arch` picks at runtime (Task 1 resolver). No signing config (unsigned by decision). No `publish` block (releases are uploaded manually with user consent).
 
 - [ ] **Step 3: Verify + commit** (build runs in Task 6, by the controller)
 
