@@ -15,6 +15,7 @@ test('normalizeEvent fills the full default shape and keeps given fields', () =>
   assert.equal(ev.leadMs, 0); assert.equal(ev.durationSec, 0); assert.equal(ev.vertical, false);
   assert.equal(ev.needsVideo, false); assert.equal(ev.repeatWeekly, false);
   assert.equal(ev.contentItemGuid, ''); assert.equal(ev.scheduleGuid, '');
+  assert.equal(ev.stationName, '');
   assert.ok(!('streamKey' in ev), 'the stream key is never a persisted field');
 });
 

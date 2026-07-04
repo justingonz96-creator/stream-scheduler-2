@@ -9,6 +9,7 @@ function buildAddPayload(f) {
     fileName: f.fileName || '', filePath: f.filePath || '', durationSec: Number(f.durationSec) || 0,
     vertical: !!f.vertical,
     contentItemGuid: f.contentItemGuid || '', scheduleGuid: f.scheduleGuid || '',
+    stationName: f.stationName || '',
     fireAt: Number(f.fireAt) || 0, leadMs: (Number(f.leadMin) || 0) * 60000,
     autoStop: f.autoStop === undefined ? true : !!f.autoStop,
     repeatWeekly: !!f.repeatWeekly,
@@ -21,7 +22,7 @@ if (typeof document !== 'undefined') {
   const F = window.Fmt, FS = window.FormState;
 
   // form working state
-  const form = { filePath: '', fileName: '', durationSec: 0, vertical: false, fireAt: 0, contentItemGuid: '', scheduleGuid: '', linkChecked: false };
+  const form = { filePath: '', fileName: '', durationSec: 0, vertical: false, fireAt: 0, contentItemGuid: '', scheduleGuid: '', stationName: '', linkChecked: false };
 
   function applyPhase() {
     const state = { filePath: form.filePath, durationSec: form.durationSec, fireAt: form.fireAt, contentItemGuid: form.contentItemGuid, linkChecked: form.linkChecked };
@@ -53,6 +54,7 @@ if (typeof document !== 'undefined') {
     const r = await api.invoke('portal:checkLink', $('evPortalLink').value.trim());
     if (!r.ok) { $('evPortalStatus').textContent = '✗ ' + r.error; $('evPortalStatus').className = 'pickstatus bad'; form.linkChecked = false; applyPhase(); return; }
     form.contentItemGuid = r.contentItemGuid; form.scheduleGuid = r.scheduleGuid || ''; form.vertical = r.vertical; form.linkChecked = true;
+    form.stationName = (r.picked && r.picked.stationName) || '';
     $('evPortalStatus').textContent = '✓ ' + (r.picked && r.picked.stationName ? r.picked.stationName + ' · ' : '') + F.orientationLabel(r.vertical);
     $('evPortalStatus').className = 'pickstatus good'; applyPhase();
   }
@@ -96,7 +98,8 @@ if (typeof document !== 'undefined') {
         meta = 'started ' + F.fmtClock(live.fireAt);
       }
       hero.className = 'card is-live';
-      hero.innerHTML = '<span class="fc-eye">● ' + eye + '</span><div class="fc-title">' + title + '</div><div class="fc-count">' + count + '</div>' + track + '<div class="fc-meta">' + escapeHtml(meta) + '</div>';
+      const liveEye = eye + (live.stationName ? ' · ' + live.stationName : '');
+      hero.innerHTML = '<span class="fc-eye">● ' + escapeHtml(liveEye) + '</span><div class="fc-title">' + title + '</div><div class="fc-count">' + count + '</div>' + track + '<div class="fc-meta">' + escapeHtml(meta) + '</div>';
       return;
     }
     const pending = lastEvents.filter((e) => e.status === 'pending').sort((a, b) => a.fireAt - b.fireAt);
@@ -106,7 +109,9 @@ if (typeof document !== 'undefined') {
       const warn = next.needsVideo ? '<div class="fc-warn">This weekly slot still needs this week\'s video.</div>' : '';
       const ends = F.endsAround(next);
       hero.className = 'card has-next';
-      hero.innerHTML = '<span class="fc-eye">● Next up</span><div class="fc-title">' + title + '</div><div class="fc-count">' + F.fmtCountdown(next.fireAt - now) + '</div><div class="fc-meta">' + escapeHtml(F.fmtDateTime(next.fireAt) + (ends ? ' · ' + ends : '')) + '</div>' + warn;
+      const nextEye = 'Next up' + (next.stationName ? ' · ' + next.stationName : '');
+      const slate = next.leadMs > 0 ? 'slate from ' + F.fmtClock(next.fireAt - next.leadMs) : '';
+      hero.innerHTML = '<span class="fc-eye">● ' + escapeHtml(nextEye) + '</span><div class="fc-title">' + title + '</div><div class="fc-count">' + F.fmtCountdown(next.fireAt - now) + '</div><div class="fc-meta">' + escapeHtml(F.fmtDateTime(next.fireAt) + (slate ? ' · ' + slate : '') + (ends ? ' · ' + ends : '')) + '</div>' + warn;
       return;
     }
     hero.className = 'card';
@@ -131,8 +136,10 @@ if (typeof document !== 'undefined') {
     const pill = F.statusPill(ev);
     const title = ev.title || ev.fileName || '(video)';
     const ends = (ev.status === 'failed' || ev.status === 'missed') ? '' : F.endsAround(ev);   // "ends around…" is misleading on events that never played
+    const station = (upcoming && ev.stationName) ? ' <span class="meta">→ ' + escapeHtml(ev.stationName) + '</span>' : '';
+    const slate = (upcoming && ev.status === 'pending' && ev.leadMs > 0) ? ' <span class="meta">' + escapeHtml('slate from ' + F.fmtClock(ev.fireAt - ev.leadMs)) + '</span>' : '';
     const outcomeMeta = (!upcoming && ev.outcome) ? ' <span class="meta">' + escapeHtml(ev.outcome) + '</span>' : '';
-    el.innerHTML = '<span class="pill ' + pill.kind + '">' + escapeHtml(pill.label) + '</span> <b>' + escapeHtml(title) + '</b> <span class="meta">' + F.fmtDateTime(ev.fireAt) + '</span>' + (ends ? ' <span class="meta">' + escapeHtml(ends) + '</span>' : '') + outcomeMeta;
+    el.innerHTML = '<span class="pill ' + pill.kind + '">' + escapeHtml(pill.label) + '</span> <b>' + escapeHtml(title) + '</b>' + station + ' <span class="meta">' + F.fmtDateTime(ev.fireAt) + '</span>' + slate + (ends ? ' <span class="meta">' + escapeHtml(ends) + '</span>' : '') + outcomeMeta;
     if (upcoming) {
       if (['starting', 'preshow', 'playing'].includes(ev.status)) { const s = btn('Stop', () => api.invoke('schedule:stop', ev.id)); el.appendChild(s); }
       else { const r = btn('Remove', async () => { const res = await api.invoke('schedule:remove', ev.id); if (!res.ok) alert(res.error); }); el.appendChild(r); }
@@ -146,7 +153,7 @@ if (typeof document !== 'undefined') {
   function showForm() { $('formCard').className = 'card'; resetForm(); }
   function hideForm() { $('formCard').className = 'card hidden'; }
   function resetForm() {
-    Object.assign(form, { filePath: '', fileName: '', durationSec: 0, vertical: false, fireAt: 0, contentItemGuid: '', scheduleGuid: '', linkChecked: false });
+    Object.assign(form, { filePath: '', fileName: '', durationSec: 0, vertical: false, fireAt: 0, contentItemGuid: '', scheduleGuid: '', stationName: '', linkChecked: false });
     for (const id of ['evDate', 'evPortalLink', 'evTitle']) $(id).value = '';
     $('evLead').value = '0'; $('evAutoStop').checked = true; $('evRepeat').checked = false;
     $('fileCheck').textContent = ''; $('evPortalStatus').textContent = '';

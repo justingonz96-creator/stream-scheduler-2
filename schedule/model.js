@@ -10,6 +10,7 @@ function normalizeEvent(e) {
   return Object.assign({
     id: '', slotId: '', title: '',
     fileName: '', filePath: '', durationSec: 0, vertical: false,
+    stationName: '',   // display-only: the studio picked at schedule time (go-live re-resolves fresh)
     contentItemGuid: '', scheduleGuid: '',
     fireAt: 0, leadMs: 0, autoStop: true, repeatWeekly: false, needsVideo: false,
     status: 'pending', outcome: '', doneAt: 0,
