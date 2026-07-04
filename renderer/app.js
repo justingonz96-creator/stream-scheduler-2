@@ -31,6 +31,7 @@ if (typeof document !== 'undefined') {
     $('pickedSummary').textContent = ph.step1 === 'collapsed' ? '✓ ' + FS.pickedSummary(state) : '';
     $('btnSave').disabled = !ph.canSave;
     $('btnSave').title = ph.canSave ? '' : ph.reasons.join('  •  ');
+    $('saveHint').textContent = ph.canSave ? '' : ph.reasons.join('   ');   // visible, not tooltip-only
   }
 
   function recomputeFireAt() {
@@ -80,7 +81,9 @@ if (typeof document !== 'undefined') {
     const el = document.createElement('div'); el.className = 'schedrow';
     const pill = F.statusPill(ev);
     const title = ev.title || ev.fileName || '(video)';
-    el.innerHTML = '<span class="pill ' + pill.kind + '">' + escapeHtml(pill.label) + '</span> <b>' + escapeHtml(title) + '</b> <span class="meta">' + F.fmtDateTime(ev.fireAt) + '</span> <span class="meta">' + escapeHtml(F.endsAround(ev)) + '</span>';
+    const ends = (ev.status === 'failed' || ev.status === 'missed') ? '' : F.endsAround(ev);   // "ends around…" is misleading on events that never played
+    const outcomeMeta = (!upcoming && ev.outcome) ? ' <span class="meta">' + escapeHtml(ev.outcome) + '</span>' : '';
+    el.innerHTML = '<span class="pill ' + pill.kind + '">' + escapeHtml(pill.label) + '</span> <b>' + escapeHtml(title) + '</b> <span class="meta">' + F.fmtDateTime(ev.fireAt) + '</span>' + (ends ? ' <span class="meta">' + escapeHtml(ends) + '</span>' : '') + outcomeMeta;
     if (upcoming) {
       if (['starting', 'preshow', 'playing'].includes(ev.status)) { const s = btn('Stop', () => api.invoke('schedule:stop', ev.id)); el.appendChild(s); }
       else { const r = btn('Remove', async () => { const res = await api.invoke('schedule:remove', ev.id); if (!res.ok) alert(res.error); }); el.appendChild(r); }
@@ -134,6 +137,7 @@ if (typeof document !== 'undefined') {
     const chk = await api.invoke('engine:selfCheck');
     if (!chk.ok) { $('alertBar').textContent = '⚠ The video engine isn\'t ready: ' + (chk.error || '') ; $('alertBar').className = 'alert bad'; }
     $('engineStatus').textContent = chk.ok ? ('Video engine ready — ' + (chk.version || 'bundled FFmpeg')) : ('Video engine problem: ' + (chk.error || ''));
+    $('engineStatus').className = chk.ok ? 'setup-sub' : 'setup-sub bad';
     // update notice (spec §8): silent no-op on any failure — fire-and-forget, so a
     // firewalled network can never stall the button wiring below.
     api.invoke('update:check').then((upd) => {

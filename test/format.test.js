@@ -9,7 +9,7 @@ test('statusPill maps every scheduler status', () => {
   assert.equal(F.statusPill({ status: 'preshow' }).label, 'Slate up');
   assert.equal(F.statusPill({ status: 'starting' }).label, 'Starting…');
   assert.equal(F.statusPill({ status: 'pending' }).label, 'Scheduled');
-  assert.equal(F.statusPill({ status: 'done', outcome: 'Played ✓ and the stream ended' }).label, 'Played ✓ and the stream ended');
+  assert.equal(F.statusPill({ status: 'done', outcome: 'Played ✓ and the stream ended' }).label, 'Played ✓', 'past-event pills stay short; the outcome renders as row meta');
   assert.equal(F.statusPill({ status: 'failed', outcome: '' }).label, 'Failed');
   assert.equal(F.statusPill({ status: 'missed', outcome: '' }).kind, 'missed');
 });

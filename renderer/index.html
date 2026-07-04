@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Stream Scheduler</title>
+<title>Stream Scheduler 2</title>
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 <div class="wrap">
   <header class="topbar">
-    <div class="logo">Stream<span class="dot"> Scheduler</span></div>
+    <div class="logo">Stream<span class="dot"> Scheduler 2</span></div>
     <div class="spacer"></div>
     <button id="btnGear" class="btn-ghost" title="Setup">Setup</button>
     <button id="btnTheme" class="btn-ghost" title="Switch dark / light mode">Theme</button>
@@ -115,6 +115,7 @@
         <button class="btn-primary btn-big" id="btnSave">✓ Schedule it</button>
         <button class="btn-quiet" id="btnCancel">Cancel</button>
       </div>
+      <div class="fhint" id="saveHint" style="margin-top:8px;"></div>
     </div>
 
     <h2 class="section">Schedule</h2>
@@ -126,7 +127,7 @@
   <div id="viewSetup" class="hidden">
     <div class="card">
       <h3 style="margin:0; font-size:var(--fs-5);">Setup for this computer</h3>
-      <p style="color:var(--ink-soft); font-size:var(--fs-2);" id="engineStatus">Checking the video engine…</p>
+      <p class="setup-sub" id="engineStatus">Checking the video engine…</p>
 
       <div class="setup-step"><div class="setup-num">1</div><div class="setup-body">
         <h3>The slate <span style="font-weight:400;color:var(--ink-soft)">(optional)</span></h3>

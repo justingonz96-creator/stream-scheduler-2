@@ -32,7 +32,7 @@ if (process.argv.includes('--selfcheck')) {
   function createWindow() {
     win = new BrowserWindow({
       width: 480, height: 940,
-      title: 'Stream Scheduler 2.0',
+      title: 'Stream Scheduler 2',
       webPreferences: {
         preload: path.join(__dirname, 'preload.js'),
         contextIsolation: true, nodeIntegration: false,

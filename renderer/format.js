@@ -25,9 +25,11 @@ const STATUS = {
 };
 function statusPill(ev) {
   if (STATUS[ev.status]) return { ...STATUS[ev.status] };
-  if (ev.status === 'done') return { label: ev.outcome || 'Played', kind: 'done' };
-  if (ev.status === 'failed') return { label: ev.outcome || 'Failed', kind: 'failed' };
-  if (ev.status === 'missed') return { label: ev.outcome || 'Missed', kind: 'missed' };
+  // Past events keep the pill SHORT; the full outcome sentence renders as row meta
+  // (a paragraph-length pill buries the class name — visual-audit finding).
+  if (ev.status === 'done') return { label: 'Played ✓', kind: 'done' };
+  if (ev.status === 'failed') return { label: 'Failed', kind: 'failed' };
+  if (ev.status === 'missed') return { label: 'Missed', kind: 'missed' };
   return { label: ev.status || '', kind: 'pending' };
 }
 

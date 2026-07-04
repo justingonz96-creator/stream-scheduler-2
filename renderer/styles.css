@@ -393,7 +393,7 @@
 .form-dim { opacity: 0.45; pointer-events: none; filter: saturate(0.6); }
 
 /* ---- Schedule rows + pills + alert bar (these elements are built by app.js, so their classes need styling even though 1.x rendered rows differently) ---- */
-.schedrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 14px; background: var(--surface-2); border-radius: 12px; margin-bottom: 8px; }
+.schedrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 14px; background: var(--card); box-shadow: var(--shadow-sm); border-radius: 12px; margin-bottom: 8px; }
 .schedrow .meta { color: var(--ink-soft); font-size: var(--fs-1); }
 .schedrow button { margin-left: auto; }
 .pill { padding: 3px 10px; border-radius: 999px; font-size: var(--fs-1); font-weight: 700; background: var(--chip); }
@@ -408,3 +408,7 @@
 .pickstatus.good { color: var(--good); }
 .pickstatus.bad { color: var(--bad); }
 .hidden { display: none !important; }
+
+/* Setup status line: quiet normally, unmistakably red when the engine is broken */
+.setup-sub { color: var(--ink-soft); font-size: var(--fs-2); }
+#engineStatus.bad { color: var(--bad); font-weight: 600; }
