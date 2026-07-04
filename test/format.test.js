@@ -42,3 +42,12 @@ test('orientationLabel', () => {
   assert.match(F.orientationLabel(true), /9:16/);
   assert.match(F.orientationLabel(false), /16:9/);
 });
+
+test('fmtCountdown: due, minutes, hours, days', () => {
+  assert.equal(F.fmtCountdown(0), '0:00');
+  assert.equal(F.fmtCountdown(-5000), '0:00');
+  assert.equal(F.fmtCountdown(45 * 1000), '0:45');
+  assert.equal(F.fmtCountdown((14 * 60 + 32) * 1000), '14:32');
+  assert.equal(F.fmtCountdown(((2 * 3600) + (14 * 60) + 9) * 1000), '2:14:09');
+  assert.equal(F.fmtCountdown(((5 * 86400) + (3 * 3600)) * 1000), '5d 3h');
+});

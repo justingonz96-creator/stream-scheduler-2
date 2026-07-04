@@ -44,6 +44,17 @@ function buildTimeOptions() {
   return { hours, minutes };
 }
 
+// Big-numeral countdown for the hero card: '5d 3h' far out, '2:14:09' within
+// hours, '14:32' inside the hour, '0:00' once due. Tabular digits keep it steady.
+function fmtCountdown(msLeft) {
+  if (msLeft <= 0) return '0:00';
+  const s = Math.floor(msLeft / 1000);
+  if (s >= 36 * 3600) { const d = Math.floor(s / 86400); const h = Math.floor((s % 86400) / 3600); return d + 'd ' + h + 'h'; }
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  if (h > 0) return h + ':' + String(m).padStart(2, '0') + ':' + String(sec).padStart(2, '0');
+  return m + ':' + String(sec).padStart(2, '0');
+}
+
 function orientationLabel(vertical) { return vertical ? 'Vertical (9:16)' : 'Widescreen (16:9)'; }
 
 function parseDateTime(dateStr, hour, min, ap) {
@@ -55,6 +66,6 @@ function parseDateTime(dateStr, hour, min, ap) {
   return new Date(+m[1], +m[2] - 1, +m[3], h, mm, 0, 0).getTime();
 }
 
-const FMT_API = { fmtClock, fmtDateTime, statusPill, endsAround, buildTimeOptions, orientationLabel, parseDateTime };
+const FMT_API = { fmtClock, fmtDateTime, statusPill, endsAround, buildTimeOptions, orientationLabel, parseDateTime, fmtCountdown };
 if (typeof module !== 'undefined' && module.exports) module.exports = FMT_API;
 if (typeof window !== 'undefined') window.Fmt = FMT_API;

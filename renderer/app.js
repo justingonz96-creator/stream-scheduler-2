@@ -66,7 +66,56 @@ if (typeof document !== 'undefined') {
     hideForm();
   }
 
+  let lastEvents = [];
+
+  // The hero card: the app's one glanceable instrument. ON AIR (remaining time +
+  // progress track) / SLATE UP (countdown to the video) / NEXT UP (ticking
+  // countdown) / an invitation when nothing is scheduled. Restored from 1.x —
+  // its styling (#heroCard/.fc-*) shipped with the theme port.
+  function renderHero() {
+    const hero = $('heroCard');
+    if (!hero) return;
+    const now = Date.now();
+    const live = lastEvents.find((e) => ['starting', 'preshow', 'playing'].includes(e.status));
+    if (live) {
+      const eye = live.status === 'playing' ? 'On air' : (live.status === 'preshow' ? 'Slate up' : 'Starting…');
+      const title = escapeHtml(live.title || live.fileName || '(video)');
+      let count, track = '', meta;
+      if (live.status !== 'playing') {
+        count = F.fmtCountdown(live.fireAt - now);
+        meta = 'video starts at ' + F.fmtClock(live.fireAt);
+      } else if (live.durationSec > 0) {
+        const endMs = live.fireAt + live.durationSec * 1000;
+        count = F.fmtCountdown(endMs - now);
+        const pct = Math.max(0, Math.min(100, ((now - live.fireAt) / (live.durationSec * 1000)) * 100));
+        track = '<div class="fc-track"><div class="fc-bar"><i style="width:' + pct + '%"></i><b style="left:' + pct + '%"></b></div>'
+              + '<div class="fc-marks"><span class="s0">started ' + F.fmtClock(live.fireAt) + '</span><span class="s1">ends ' + F.fmtClock(endMs) + '</span></div></div>';
+        meta = live.autoStop ? 'the stream ends by itself when the video finishes' : 'the broadcast stays open until someone ends it';
+      } else {
+        count = F.fmtCountdown(now - live.fireAt);
+        meta = 'started ' + F.fmtClock(live.fireAt);
+      }
+      hero.className = 'card is-live';
+      hero.innerHTML = '<span class="fc-eye">● ' + eye + '</span><div class="fc-title">' + title + '</div><div class="fc-count">' + count + '</div>' + track + '<div class="fc-meta">' + escapeHtml(meta) + '</div>';
+      return;
+    }
+    const pending = lastEvents.filter((e) => e.status === 'pending').sort((a, b) => a.fireAt - b.fireAt);
+    const next = pending[0];
+    if (next) {
+      const title = escapeHtml(next.title || next.fileName || '(video)');
+      const warn = next.needsVideo ? '<div class="fc-warn">This weekly slot still needs this week\'s video.</div>' : '';
+      const ends = F.endsAround(next);
+      hero.className = 'card has-next';
+      hero.innerHTML = '<span class="fc-eye">● Next up</span><div class="fc-title">' + title + '</div><div class="fc-count">' + F.fmtCountdown(next.fireAt - now) + '</div><div class="fc-meta">' + escapeHtml(F.fmtDateTime(next.fireAt) + (ends ? ' · ' + ends : '')) + '</div>' + warn;
+      return;
+    }
+    hero.className = 'card';
+    hero.innerHTML = '<div class="fc-idle">Nothing scheduled yet — press <b>+ Schedule a video</b> to put a class on the calendar.</div>';
+  }
+
   function renderList(events) {
+    lastEvents = events.slice();
+    renderHero();
     const up = events.filter((e) => ['pending', 'starting', 'preshow', 'playing'].includes(e.status));
     const past = events.filter((e) => ['done', 'failed', 'missed'].includes(e.status));
     const live = up.find((e) => ['starting', 'preshow', 'playing'].includes(e.status));
@@ -157,7 +206,7 @@ if (typeof document !== 'undefined') {
     $('btnStopNow').onclick = async () => { const evs = await api.invoke('schedule:list'); const live = evs.find((e) => ['starting', 'preshow', 'playing'].includes(e.status)); if (live) api.invoke('schedule:stop', live.id); };
     $('btnTheme').onclick = () => { const el = document.documentElement; el.setAttribute('data-theme', el.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'); };
     // clock
-    setInterval(() => { $('clockNow').textContent = F.fmtClock(Date.now()); }, 1000); $('clockNow').textContent = F.fmtClock(Date.now());
+    setInterval(() => { $('clockNow').textContent = F.fmtClock(Date.now()); renderHero(); }, 1000); $('clockNow').textContent = F.fmtClock(Date.now());
     // schedule
     renderList(await api.invoke('schedule:list'));
     api.onScheduleChanged((events) => renderList(events));
