@@ -216,6 +216,17 @@ test('addEvent normalizes + persists; removeEvent refuses the live event', async
   assert.match(r.error, /Stop the live broadcast/i);
 });
 
+test('shutdown() clears the timer and stops a live encode (no orphaned ffmpeg on quit)', async () => {
+  const h = harness({ events: [liveEvent()] });
+  h.setClock(70000); await h.sched.tick();
+  h.spawned[0].emit('playing');
+  assert.equal(h.spawned[0].stopped, false);
+  h.sched.shutdown();
+  assert.equal(h.spawned[0].stopped, true, 'the live broadcast child is stopped on shutdown');
+  h.setClock(80000); await h.sched.tick();
+  assert.equal(h.spawned.length, 1, 'shutdown leaves no active broadcast to act on');
+});
+
 test('addEvent sanitizes lifecycle fields from wire payloads', () => {
   const h = harness({ events: [] });
   const ev = h.sched.addEvent({ title: 'X', filePath: '/v.mp4', durationSec: 1, fireAt: 99, status: 'playing', outcome: 'fake', doneAt: 123, slotId: 'stolen', needsVideo: true });

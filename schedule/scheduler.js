@@ -228,7 +228,18 @@ function createScheduler({ store, portal, engineFactory, settings, now = () => D
   function start() { if (!timer) timer = setInterval(() => { tick().catch((e) => log('tick error: ' + ((e && e.message) || e))); }, 1000); }
   function stop() { if (timer) { clearInterval(timer); timer = null; } }
 
-  return { tick, start, stop, getEvents, addEvent, removeEvent, stopActive, onChanged };
+  // App shutdown: clear the timer AND kill any live encode so no ffmpeg child is
+  // orphaned (a background process that keeps running after the window closes).
+  // Best-effort and synchronous — the app is quitting, so we don't await a
+  // portal end here; we just make sure the child dies with us.
+  function shutdown() {
+    stop();
+    const bc = active && active.broadcast;
+    active = null;
+    try { if (bc) bc.stop(); } catch {}
+  }
+
+  return { tick, start, stop, shutdown, getEvents, addEvent, removeEvent, stopActive, onChanged };
 }
 
 module.exports = { createScheduler };

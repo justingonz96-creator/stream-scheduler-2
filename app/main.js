@@ -29,6 +29,7 @@ if (process.argv.includes('--selfcheck')) {
   if (!gotLock) { app.quit(); return; }
 
   let win = null;
+  let scheduler = null;   // hoisted so before-quit can reach it (it owns the live encode)
   function createWindow() {
     win = new BrowserWindow({
       width: 480, height: 940,
@@ -50,7 +51,7 @@ if (process.argv.includes('--selfcheck')) {
       log: (m) => console.log('[portal] ' + m),
     });
     let idc = 0;
-    const scheduler = createScheduler({
+    scheduler = createScheduler({
       store: scheduleStore, portal, settings,
       engineFactory: (opts) => new Broadcast(opts),
       genId: () => 'ev' + Date.now() + '-' + (idc++),
@@ -76,5 +77,8 @@ if (process.argv.includes('--selfcheck')) {
   }
   app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
   app.whenReady().then(createWindow);
+  // Kill the scheduler timer + any live encode on the way out, so no ffmpeg
+  // child is left running in the background after the window closes.
+  app.on('before-quit', () => { try { if (scheduler) scheduler.shutdown(); } catch {} });
   app.on('window-all-closed', () => app.quit());
 }
