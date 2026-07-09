@@ -35,7 +35,10 @@ function buildBroadcastArgs(o) {
     filter = [
       `[0:v]${fit}[slv]`,
       `[2:v]${fit}[vv]`,
-      `[slv][vv]xfade=transition=fade:duration=${fade}:offset=${o.leadSec}[vout]`,
+      // `realtime` clamps the graph output to wall-clock. Per-input `-re` reliably
+      // paces a SINGLE input, but not this multi-input (looped slate) composition —
+      // without it the slate path ran ~4.7% fast, ending classes minutes early.
+      `[slv][vv]xfade=transition=fade:duration=${fade}:offset=${o.leadSec},realtime[vout]`,
       `[1:a]${afmt}[sla]`,
       `[2:a]${afmt}[va]`,
       `[sla][va]acrossfade=d=${fade}[aout]`,

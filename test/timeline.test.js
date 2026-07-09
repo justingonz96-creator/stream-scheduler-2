@@ -50,6 +50,19 @@ test('resume → -ss before the video input, no slate', () => {
   assert.ok(ss < a.indexOf('/media/class.mp4'), '-ss placed before -i (fast seek)');
 });
 
+test('slate path is realtime-paced (regression: multi-input -re under-paces without it)', () => {
+  // The bug: per-input -re does NOT reliably pace a multi-input filtergraph output;
+  // the slate/fade path ran ~4.7% fast, ending a 45-min class ~2 min early. The
+  // `realtime` filter clamps the graph output to wall-clock. Measured: 1.047 → 1.000.
+  const s = buildBroadcastArgs(BASE).join(' ');
+  assert.ok(/xfade=[^\]]*,realtime\[vout\]/.test(s), 'slate video chain must end with ,realtime[vout]');
+});
+
+test('the proven-good plain + resume paths are NOT touched (no realtime added)', () => {
+  assert.ok(!buildBroadcastArgs({ ...BASE, leadSec: 0 }).join(' ').includes('realtime'), 'plain path unchanged');
+  assert.ok(!buildBroadcastArgs({ ...BASE, resumeOffsetSec: 372 }).join(' ').includes('realtime'), 'resume path unchanged');
+});
+
 test('videoStartsAtSec: lead with slate, 0 otherwise', () => {
   assert.equal(videoStartsAtSec({ ...BASE }), 300);
   assert.equal(videoStartsAtSec({ ...BASE, leadSec: 0 }), 0);

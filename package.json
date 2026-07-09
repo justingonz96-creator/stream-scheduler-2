@@ -1,7 +1,7 @@
 {
   "name": "stream-scheduler-2",
   "productName": "Stream Scheduler 2",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "private": true,
   "main": "app/main.js",
   "scripts": {
@@ -12,7 +12,8 @@
     "rehearsal:resume": "node scripts/rehearsal-resume.js",
     "rehearsal:brain": "node scripts/brain-rehearsal.js",
     "dist:mac": "electron-builder --mac",
-    "dist:win": "electron-builder --win"
+    "dist:win": "electron-builder --win",
+    "rehearsal:pacing": "node scripts/rehearsal-pacing.js"
   },
   "devDependencies": {
     "electron": "^43.0.0",
