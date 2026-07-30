@@ -142,13 +142,36 @@ test('resume respects MAX_RESUMES then fails cleanly', async () => {
   assert.equal(h.sched.getEvents()[0].status, 'failed');
 });
 
-test('missed: past the grace window ⇒ missed (never spawns)', async () => {
-  const h = harness({ events: [liveEvent()] });
-  h.setClock(100000 + 120000 + 1);       // fireAt + GRACE + 1ms
+test('late start (video still has content left) seeks ahead to match the clock, no slate', async () => {
+  const h = harness({ events: [liveEvent()] });   // fireAt 100000, durationSec 600, leadMs 30000
+  h.setClock(100000 + 300000);                    // 5 minutes late
+  await h.sched.tick();
+  assert.equal(h.spawned.length, 1);
+  assert.equal(h.spawned[0].opts.resumeOffsetSec, 300, 'seeks in by exactly how late it is');
+  assert.equal(h.spawned[0].opts.leadSec, 0, 'no slate when starting mid-video');
+  assert.equal(h.spawned[0].opts.slateImage, '');
+  h.spawned[0].emit('playing');
+  assert.equal(h.sched.getEvents()[0].status, 'playing', 'goes straight to playing, never preshow');
+});
+
+test('too late: the class would already be over ⇒ missed, no engine spawned, no portal call', async () => {
+  const h = harness({ events: [liveEvent()] });   // durationSec 600
+  h.setClock(100000 + 600000 + 1000);             // 601s late — past the video's own length
+  await h.sched.tick();
+  assert.equal(h.spawned.length, 0);
+  const ev = h.sched.getEvents()[0];
+  assert.equal(ev.status, 'missed');
+  assert.match(ev.outcome, /already be over/i);
+});
+
+test('unknown duration (defensive: durationSec 0) falls back to the old 2-minute grace cap', async () => {
+  const h = harness({ events: [liveEvent({ durationSec: 0, leadMs: 0 })] });
+  h.setClock(100000 + 120000 + 1);                // just past the old GRACE_MS
   await h.sched.tick();
   assert.equal(h.spawned.length, 0);
   assert.equal(h.sched.getEvents()[0].status, 'missed');
 });
+
 
 test('needsVideo weekly slot never goes live', async () => {
   const h = harness({ events: [liveEvent({ needsVideo: true, filePath: '' })] });

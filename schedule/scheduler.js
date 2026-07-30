@@ -39,10 +39,10 @@ function createScheduler({ store, portal, engineFactory, settings, now = () => D
     if (nv) events.push(nv);
   }
 
-  function markMissed(ev) {
+  function markMissed(ev, reason) {
     ev.status = 'missed';
-    ev.outcome = ev.needsVideo ? 'Missed — no video was chosen for this week'
-                               : 'Missed — this window was not open at start time';
+    ev.outcome = reason || (ev.needsVideo ? 'Missed — no video was chosen for this week'
+                                          : 'Missed — this window was not open at start time');
     ev.doneAt = now();
     renew(ev);
     persist();
@@ -162,7 +162,15 @@ function createScheduler({ store, portal, engineFactory, settings, now = () => D
     try { target = await portal.streamTarget({ contentItemGuid: ev.contentItemGuid, scheduleGuid: ev.scheduleGuid }); }
     catch (e) { fail(ev, 'the studio could not be reached: ' + ((e && e.message) || e)); return; }
     if (!target || !target.ok) { fail(ev, (target && target.error) || 'no studio was returned by the portal'); return; }
-    spawn(ev, { leadSec: computeLeadSec(ev, now()), resumeOffsetSec: 0, target, retried: false, resumeCount: 0 });
+    // Starting late: no slate (the video should already be under way), and seek
+    // in by exactly how late we are — the SAME resumeOffsetSec mechanism already
+    // proven for the mid-broadcast-drop recovery path, just triggered by a late
+    // start instead of a dropped connection. Because it lands the video at the
+    // real elapsed time, the class still finishes at its originally scheduled
+    // end time — "ends around" stays honest with no other change needed.
+    const lateSec = Math.max(0, (now() - ev.fireAt) / 1000);
+    const leadSec = lateSec > 0 ? 0 : computeLeadSec(ev, now());
+    spawn(ev, { leadSec, resumeOffsetSec: lateSec, target, retried: false, resumeCount: 0 });
   }
 
   async function tick() {
@@ -172,8 +180,19 @@ function createScheduler({ store, portal, engineFactory, settings, now = () => D
       if (ev.status !== 'pending') continue;
       const streamAt = hasSlate ? streamAtOf(ev) : ev.fireAt;
       if (t < streamAt) continue;
-      if (t - ev.fireAt > GRACE_MS) { markMissed(ev); continue; }
-      if (ev.needsVideo) continue;             // a weekly slot with no video never goes live
+      if (ev.needsVideo) {
+        if (t - ev.fireAt > GRACE_MS) markMissed(ev);   // no video ever showed up for this slot
+        continue;                                        // a weekly slot with no video never goes live
+      }
+      // A late start seeks the video ahead to match the clock (below) rather than
+      // capping at a fixed grace window — so "missed" now means the video itself
+      // would already be finished by the time it could start, not just "took a
+      // while to notice". durationSec is unknown (0) only defensively (a probed
+      // event always has it); fall back to the old fixed cap in that case.
+      const lateSec = Math.max(0, (t - ev.fireAt) / 1000);
+      if (ev.durationSec > 0) {
+        if (lateSec >= ev.durationSec) { markMissed(ev, 'Missed — this class would already be over by the time it could start'); continue; }
+      } else if (t - ev.fireAt > GRACE_MS) { markMissed(ev); continue; }
       if (busy) continue;
       if (active) {
         const cur = byId(active.eventId);
