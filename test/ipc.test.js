@@ -18,7 +18,7 @@ test('parsePortalLink: junk → empty', () => {
 });
 
 function handlers(over = {}) {
-  const calls = { save: [], setPw: [], add: [], remove: [], stop: [], check: [] };
+  const calls = { save: [], setPw: [], add: [], update: [], remove: [], stop: [], check: [] };
   const base = {
     settings: { get: () => ({ videoBitrate: 6000 }), save: (p) => { calls.save.push(p); return { videoBitrate: 6000, ...p }; } },
     secrets: { has: () => true, set: (k, v) => { calls.setPw.push([k, v]); } },
@@ -29,6 +29,7 @@ function handlers(over = {}) {
     scheduler: {
       getEvents: () => [{ id: 'e1' }],
       addEvent: (e) => { calls.add.push(e); return { id: 'new', ...e }; },
+      updateEvent: (id, patch) => { calls.update.push([id, patch]); return { ok: true, event: { id, ...patch } }; },
       removeEvent: (id) => { calls.remove.push(id); return { ok: true }; },
       stopActive: async (id) => { calls.stop.push(id); return { ok: true }; },
     },
@@ -43,7 +44,7 @@ test('handler map covers exactly the expected channels', () => {
   const { h } = handlers();
   assert.deepEqual(Object.keys(h).sort(), [
     'engine:selfCheck', 'portal:checkLink', 'portal:testLogin', 'probe:file',
-    'schedule:add', 'schedule:list', 'schedule:remove', 'schedule:stop',
+    'schedule:add', 'schedule:list', 'schedule:remove', 'schedule:stop', 'schedule:update',
     'secret:hasPassword', 'secret:setPassword', 'settings:get', 'settings:save',
     'update:check',
   ].sort());
@@ -78,6 +79,8 @@ test('schedule + probe + selfCheck handlers delegate correctly', async () => {
   const { h, calls } = handlers();
   assert.deepEqual(await h['schedule:list'](), [{ id: 'e1' }]);
   await h['schedule:add']({ title: 'T' }); assert.equal(calls.add[0].title, 'T');
+  await h['schedule:update']({ id: 'e1', patch: { title: 'T2' } });
+  assert.deepEqual(calls.update[0], ['e1', { title: 'T2' }]);
   await h['schedule:remove']('e1'); assert.equal(calls.remove[0], 'e1');
   await h['schedule:stop']('e1'); assert.equal(calls.stop[0], 'e1');
   assert.equal((await h['probe:file']('/v.mp4')).durationSec, 10);

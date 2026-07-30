@@ -200,6 +200,28 @@ function createScheduler({ store, portal, engineFactory, settings, now = () => D
     return { ...norm };
   }
 
+  // Editing an upcoming broadcast. Same law as addEvent: a wire payload can only
+  // change the fields an operator legitimately owns — never lifecycle state, never
+  // the id, and never a weekly slot's identity (that chain must survive an edit).
+  const EDITABLE = ['title', 'fileName', 'filePath', 'durationSec', 'vertical', 'stationName',
+                    'contentItemGuid', 'scheduleGuid', 'fireAt', 'leadMs', 'autoStop', 'repeatWeekly'];
+  function updateEvent(id, patch) {
+    if (busy) return { ok: false, error: 'The scheduler is busy — try again in a moment.' };
+    if (active && active.eventId === id) return { ok: false, error: 'Stop the live broadcast before changing it.' };
+    const ev = byId(id);
+    if (!ev) return { ok: false, error: 'That broadcast was not found.' };
+    if (ev.status !== 'pending') return { ok: false, error: 'Only upcoming broadcasts can be changed.' };
+    const p = patch || {};
+    const next = { ...ev };
+    for (const k of EDITABLE) if (p[k] !== undefined) next[k] = p[k];
+    for (const k of ['fireAt', 'leadMs', 'durationSec']) next[k] = Number(next[k]) || 0;
+    const merged = normalizeEvent({ ...next, id: ev.id, slotId: ev.slotId, status: 'pending', outcome: '', doneAt: 0 });
+    merged.needsVideo = !merged.filePath;   // no video ⇒ still waiting for one (never goes live)
+    Object.assign(ev, merged);
+    persist();
+    return { ok: true, event: { ...ev } };
+  }
+
   function removeEvent(id) {
     if (busy) return { ok: false, error: 'The scheduler is busy — try again in a moment.' };
     if (active && active.eventId === id) return { ok: false, error: 'Stop the live broadcast before removing it.' };
@@ -239,7 +261,7 @@ function createScheduler({ store, portal, engineFactory, settings, now = () => D
     try { if (bc) bc.stop(); } catch {}
   }
 
-  return { tick, start, stop, shutdown, getEvents, addEvent, removeEvent, stopActive, onChanged };
+  return { tick, start, stop, shutdown, getEvents, addEvent, updateEvent, removeEvent, stopActive, onChanged };
 }
 
 module.exports = { createScheduler };

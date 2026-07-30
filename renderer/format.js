@@ -55,6 +55,16 @@ function fmtCountdown(msLeft) {
   return m + ':' + String(sec).padStart(2, '0');
 }
 
+// Inverse of parseDateTime: turn an instant back into the three picker values,
+// so an existing broadcast can be loaded into the form for editing.
+function splitDateTime(ms) {
+  const d = new Date(ms);
+  const date = d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+  let h = d.getHours(); const ap = h >= 12 ? 'PM' : 'AM';
+  h = h % 12; if (h === 0) h = 12;
+  return { date, hour: String(h), min: pad2(d.getMinutes()), ap };
+}
+
 function orientationLabel(vertical) { return vertical ? 'Vertical (9:16)' : 'Widescreen (16:9)'; }
 
 function parseDateTime(dateStr, hour, min, ap) {
@@ -66,6 +76,6 @@ function parseDateTime(dateStr, hour, min, ap) {
   return new Date(+m[1], +m[2] - 1, +m[3], h, mm, 0, 0).getTime();
 }
 
-const FMT_API = { fmtClock, fmtDateTime, statusPill, endsAround, buildTimeOptions, orientationLabel, parseDateTime, fmtCountdown };
+const FMT_API = { fmtClock, fmtDateTime, statusPill, endsAround, buildTimeOptions, orientationLabel, parseDateTime, splitDateTime, fmtCountdown };
 if (typeof module !== 'undefined' && module.exports) module.exports = FMT_API;
 if (typeof window !== 'undefined') window.Fmt = FMT_API;

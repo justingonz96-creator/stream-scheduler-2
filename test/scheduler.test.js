@@ -227,6 +227,64 @@ test('shutdown() clears the timer and stops a live encode (no orphaned ffmpeg on
   assert.equal(h.spawned.length, 1, 'shutdown leaves no active broadcast to act on');
 });
 
+test('updateEvent: edits an upcoming broadcast and persists', () => {
+  const h = harness({ events: [liveEvent({ id: 'u1', title: 'Old', fireAt: 500000, leadMs: 0 })] });
+  const r = h.sched.updateEvent('u1', { title: 'New Title', fireAt: 900000, leadMs: 300000, autoStop: false });
+  assert.equal(r.ok, true);
+  const ev = h.sched.getEvents().find((e) => e.id === 'u1');
+  assert.equal(ev.title, 'New Title');
+  assert.equal(ev.fireAt, 900000);
+  assert.equal(ev.leadMs, 300000);
+  assert.equal(ev.autoStop, false);
+  assert.equal(ev.status, 'pending');
+});
+
+test('updateEvent: refuses the live broadcast, non-pending events, and unknown ids', async () => {
+  const h = harness({ events: [liveEvent({ id: 'L' }), liveEvent({ id: 'D', status: 'done', fireAt: 1 }), liveEvent({ id: 'M', status: 'missed', fireAt: 2 })] });
+  h.setClock(70000); await h.sched.tick();
+  h.spawned[0].emit('playing');
+  const live = h.sched.updateEvent('L', { title: 'nope' });
+  assert.equal(live.ok, false); assert.match(live.error, /stop the live broadcast/i);
+  const done = h.sched.updateEvent('D', { title: 'nope' });
+  assert.equal(done.ok, false); assert.match(done.error, /only upcoming/i);
+  assert.equal(h.sched.updateEvent('M', { title: 'nope' }).ok, false);
+  const gone = h.sched.updateEvent('nosuch', { title: 'nope' });
+  assert.equal(gone.ok, false); assert.match(gone.error, /not found/i);
+});
+
+test('updateEvent: a wire payload cannot inject lifecycle state or steal slot identity', () => {
+  const h = harness({ events: [liveEvent({ id: 'u2', slotId: 'weekly-slot', fireAt: 500000 })] });
+  h.sched.updateEvent('u2', { title: 'ok', id: 'hijack', slotId: 'stolen', status: 'playing', outcome: 'fake', doneAt: 123 });
+  const ev = h.sched.getEvents().find((e) => e.id === 'u2');
+  assert.equal(ev.id, 'u2'); assert.equal(ev.slotId, 'weekly-slot');
+  assert.equal(ev.status, 'pending'); assert.equal(ev.outcome, ''); assert.equal(ev.doneAt, 0);
+  assert.equal(ev.title, 'ok');
+});
+
+test('updateEvent: giving an empty weekly slot a video clears needsVideo (and removing it restores)', () => {
+  const h = harness({ events: [liveEvent({ id: 'w1', slotId: 's', needsVideo: true, filePath: '', fileName: '', durationSec: 0, fireAt: 500000 })] });
+  h.sched.updateEvent('w1', { filePath: '/this-week.mp4', fileName: 'this-week.mp4', durationSec: 1800 });
+  let ev = h.sched.getEvents().find((e) => e.id === 'w1');
+  assert.equal(ev.needsVideo, false, 'a slot with a video no longer needs one');
+  assert.equal(ev.filePath, '/this-week.mp4');
+  h.sched.updateEvent('w1', { filePath: '', fileName: '', durationSec: 0 });
+  ev = h.sched.getEvents().find((e) => e.id === 'w1');
+  assert.equal(ev.needsVideo, true, 'clearing the video makes it wait again');
+});
+
+test('updateEvent: refused while the scheduler is busy going live', async () => {
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const h = harness({ events: [liveEvent({ id: 'b1' })], target: async () => { await gate; return { ok: true, server: 'rtmps://h/app', key: 'KEY', vertical: false }; } });
+  h.setClock(70000);
+  const ticking = h.sched.tick();
+  await new Promise((r) => setImmediate(r));
+  const r = h.sched.updateEvent('b1', { title: 'nope' });
+  assert.equal(r.ok, false); assert.match(r.error, /busy/i);
+  release({ ok: true, server: 'rtmps://h/app', key: 'KEY', vertical: false });
+  await ticking;
+});
+
 test('addEvent sanitizes lifecycle fields from wire payloads', () => {
   const h = harness({ events: [] });
   const ev = h.sched.addEvent({ title: 'X', filePath: '/v.mp4', durationSec: 1, fireAt: 99, status: 'playing', outcome: 'fake', doneAt: 123, slotId: 'stolen', needsVideo: true });

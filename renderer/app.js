@@ -22,7 +22,8 @@ if (typeof document !== 'undefined') {
   const F = window.Fmt, FS = window.FormState;
 
   // form working state
-  const form = { filePath: '', fileName: '', durationSec: 0, vertical: false, fireAt: 0, contentItemGuid: '', scheduleGuid: '', stationName: '', linkChecked: false };
+  const form = { filePath: '', fileName: '', durationSec: 0, vertical: false, fireAt: 0, contentItemGuid: '', scheduleGuid: '', stationName: '', linkChecked: false, editingId: null, startNow: false };
+  let hasSlateConfigured = false;   // a lead-in only means something when a slate picture is set up
 
   function applyPhase() {
     const state = { filePath: form.filePath, durationSec: form.durationSec, fireAt: form.fireAt, contentItemGuid: form.contentItemGuid, linkChecked: form.linkChecked };
@@ -35,9 +36,34 @@ if (typeof document !== 'undefined') {
     $('saveHint').textContent = ph.canSave ? '' : ph.reasons.join('   ');   // visible, not tooltip-only
   }
 
+  function leadMinRaw() { return parseInt($('evLead').value, 10) || 0; }
+  // "Start now" means the STREAM goes up now; the lead-in decides whether a slate
+  // plays first. With no slate picture set up a lead would just stall silently, so
+  // honour the intent instead and roll the video immediately.
+  function effectiveLeadMin() { return (form.startNow && !hasSlateConfigured) ? 0 : leadMinRaw(); }
+
   function recomputeFireAt() {
-    form.fireAt = F.parseDateTime($('evDate').value, $('evHour').value, $('evMin').value, $('evAP').value) || 0;
+    form.fireAt = form.startNow
+      ? Date.now() + effectiveLeadMin() * 60000
+      : (F.parseDateTime($('evDate').value, $('evHour').value, $('evMin').value, $('evAP').value) || 0);
+    updateWhenUI();
     applyPhase();
+  }
+
+  function updateWhenUI() {
+    $('whenLater').className = form.startNow ? 'hidden' : '';
+    const hint = $('whenNowHint');
+    if (!form.startNow) { hint.textContent = ''; hint.className = 'pickstatus'; return; }
+    const lead = effectiveLeadMin();
+    const notes = [];
+    if (leadMinRaw() > 0 && !hasSlateConfigured) notes.push('your lead-in needs a slate picture — set one up in Setup to use it');
+    const live = lastEvents.find((e) => ['starting', 'preshow', 'playing'].includes(e.status));
+    if (live) notes.push('a broadcast is on air now — starting this one will end it early');
+    hint.textContent = '▶ ' + (lead > 0
+      ? 'Stream goes live now · slate up for ' + lead + ' min · video starts about ' + F.fmtClock(Date.now() + lead * 60000)
+      : 'Stream goes live now · the video starts right away')
+      + (notes.length ? ' · ' + notes.join(' · ') : '');
+    hint.className = live ? 'pickstatus bad' : 'pickstatus good';
   }
 
   async function pickVideo() {
@@ -60,11 +86,18 @@ if (typeof document !== 'undefined') {
   }
 
   async function save() {
+    // "now" is resolved at the moment of saving, not when the option was picked.
+    if (form.startNow) form.fireAt = Date.now() + effectiveLeadMin() * 60000;
     const ph = FS.computeFormPhase({ filePath: form.filePath, durationSec: form.durationSec, fireAt: form.fireAt, contentItemGuid: form.contentItemGuid, linkChecked: form.linkChecked });
     if (!ph.canSave) { $('formError').textContent = ph.reasons.join('  '); return; }
     $('formError').textContent = '';
-    const payload = buildAddPayload({ ...form, leadMin: parseInt($('evLead').value, 10) || 0, autoStop: $('evAutoStop').checked, repeatWeekly: $('evRepeat').checked, title: $('evTitle').value.trim() });
-    await api.invoke('schedule:add', payload);
+    const payload = buildAddPayload({ ...form, leadMin: effectiveLeadMin(), autoStop: $('evAutoStop').checked, repeatWeekly: $('evRepeat').checked, title: $('evTitle').value.trim() });
+    if (form.editingId) {
+      const r = await api.invoke('schedule:update', { id: form.editingId, patch: payload });
+      if (!r || !r.ok) { $('formError').textContent = (r && r.error) || 'That broadcast could not be changed.'; return; }
+    } else {
+      await api.invoke('schedule:add', payload);
+    }
     hideForm();
   }
 
@@ -142,7 +175,10 @@ if (typeof document !== 'undefined') {
     el.innerHTML = '<span class="pill ' + pill.kind + '">' + escapeHtml(pill.label) + '</span> <b>' + escapeHtml(title) + '</b>' + station + ' <span class="meta">' + F.fmtDateTime(ev.fireAt) + '</span>' + slate + (ends ? ' <span class="meta">' + escapeHtml(ends) + '</span>' : '') + outcomeMeta;
     if (upcoming) {
       if (['starting', 'preshow', 'playing'].includes(ev.status)) { const s = btn('Stop', () => api.invoke('schedule:stop', ev.id)); el.appendChild(s); }
-      else { const r = btn('Remove', async () => { const res = await api.invoke('schedule:remove', ev.id); if (!res.ok) alert(res.error); }); el.appendChild(r); }
+      else {
+        el.appendChild(btn('Edit', () => openEdit(ev)));
+        el.appendChild(btn('Remove', async () => { const res = await api.invoke('schedule:remove', ev.id); if (!res.ok) alert(res.error); }));
+      }
     }
     return el;
   }
@@ -153,10 +189,52 @@ if (typeof document !== 'undefined') {
   function showForm() { $('formCard').className = 'card'; resetForm(); }
   function hideForm() { $('formCard').className = 'card hidden'; }
   function resetForm() {
-    Object.assign(form, { filePath: '', fileName: '', durationSec: 0, vertical: false, fireAt: 0, contentItemGuid: '', scheduleGuid: '', stationName: '', linkChecked: false });
+    Object.assign(form, { filePath: '', fileName: '', durationSec: 0, vertical: false, fireAt: 0, contentItemGuid: '', scheduleGuid: '', stationName: '', linkChecked: false, editingId: null, startNow: false });
     for (const id of ['evDate', 'evPortalLink', 'evTitle']) $(id).value = '';
     $('evLead').value = '0'; $('evAutoStop').checked = true; $('evRepeat').checked = false;
+    $('evWhen').value = 'later';
     $('fileCheck').textContent = ''; $('evPortalStatus').textContent = '';
+    $('formHeading').textContent = 'Schedule a video';
+    $('btnSave').textContent = '✓ Schedule it';
+    updateWhenUI();
+    applyPhase();
+  }
+
+  function ensureOption(sel, value) {
+    if (!Array.prototype.some.call(sel.options, (o) => o.value === value)) sel.add(new Option(value, value));
+  }
+
+  // Load an existing upcoming broadcast into the form. The class link box is
+  // rebuilt from the stored class id so it reads back the way it was pasted.
+  function openEdit(ev) {
+    $('formCard').className = 'card';
+    resetForm();
+    Object.assign(form, {
+      editingId: ev.id, filePath: ev.filePath || '', fileName: ev.fileName || '',
+      durationSec: ev.durationSec || 0, vertical: !!ev.vertical,
+      contentItemGuid: ev.contentItemGuid || '', scheduleGuid: ev.scheduleGuid || '',
+      stationName: ev.stationName || '', linkChecked: !!ev.contentItemGuid,
+      fireAt: ev.fireAt, startNow: false,
+    });
+    if (form.filePath) { $('fileCheck').textContent = '✓ ' + F.orientationLabel(form.vertical); $('fileCheck').className = 'pickstatus good'; }
+    if (ev.contentItemGuid) {
+      $('evPortalLink').value = 'https://content.echelonfit.com/classes/' + ev.contentItemGuid;
+      $('evPortalStatus').textContent = '✓ ' + (ev.stationName ? ev.stationName + ' · ' : '') + F.orientationLabel(!!ev.vertical);
+      $('evPortalStatus').className = 'pickstatus good';
+    }
+    const s = F.splitDateTime(ev.fireAt);
+    $('evDate').value = s.date;
+    ensureOption($('evHour'), s.hour); $('evHour').value = s.hour;
+    ensureOption($('evMin'), s.min); $('evMin').value = s.min;
+    $('evAP').value = s.ap;
+    const leadMin = String(Math.round((ev.leadMs || 0) / 60000));
+    ensureOption($('evLead'), leadMin); $('evLead').value = leadMin;
+    $('evAutoStop').checked = ev.autoStop !== false;
+    $('evRepeat').checked = !!ev.repeatWeekly;
+    $('evTitle').value = ev.title || '';
+    $('formHeading').textContent = 'Edit broadcast';
+    $('btnSave').textContent = '✓ Save changes';
+    updateWhenUI();
     applyPhase();
   }
 
@@ -173,6 +251,7 @@ if (typeof document !== 'undefined') {
   async function saveSetup() {
     await api.invoke('settings:save', { slateImage: $('setSlateImage').value, slateMusic: $('setSlateMusic').value, fadeMs: parseInt($('setFade').value, 10), videoBitrate: chosenBitrate(), portalEmail: $('setPortalEmail').value.trim(), portalApiKey: $('setPortalApiKey').value.trim() });
     const pw = $('setPortalPassword').value; if (pw) { await api.invoke('secret:setPassword', pw); $('setPortalPassword').value = ''; }
+    hasSlateConfigured = !!$('setSlateImage').value;
     showView('main');
   }
   async function testLogin() {
@@ -204,6 +283,8 @@ if (typeof document !== 'undefined') {
     $('btnNew').onclick = showForm; $('btnCancel').onclick = hideForm;
     $('btnPickVideo').onclick = pickVideo; $('btnChangeVideo').onclick = () => { form.filePath = ''; form.durationSec = 0; $('fileCheck').textContent = ''; applyPhase(); };
     for (const id of ['evDate', 'evHour', 'evMin', 'evAP']) $(id).addEventListener('change', recomputeFireAt);
+    $('evWhen').addEventListener('change', () => { form.startNow = $('evWhen').value === 'now'; recomputeFireAt(); });
+    $('evLead').addEventListener('change', recomputeFireAt);
     $('btnEvPortalCheck').onclick = checkLink; $('btnSave').onclick = save;
     $('btnGear').onclick = () => { loadSetup(); showView('setup'); }; $('btnSetupDone').onclick = saveSetup;
     $('btnPortalTest').onclick = testLogin;
@@ -213,7 +294,11 @@ if (typeof document !== 'undefined') {
     $('btnStopNow').onclick = async () => { const evs = await api.invoke('schedule:list'); const live = evs.find((e) => ['starting', 'preshow', 'playing'].includes(e.status)); if (live) api.invoke('schedule:stop', live.id); };
     $('btnTheme').onclick = () => { const el = document.documentElement; el.setAttribute('data-theme', el.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'); };
     // clock
-    setInterval(() => { $('clockNow').textContent = F.fmtClock(Date.now()); renderHero(); }, 1000); $('clockNow').textContent = F.fmtClock(Date.now());
+    try { const s0 = await api.invoke('settings:get'); hasSlateConfigured = !!(s0 && s0.slateImage); } catch {}
+    setInterval(() => {
+      $('clockNow').textContent = F.fmtClock(Date.now()); renderHero();
+      if (form.startNow && !$('formCard').className.includes('hidden')) updateWhenUI();   // keep "video starts about …" honest
+    }, 1000); $('clockNow').textContent = F.fmtClock(Date.now());
     // schedule
     renderList(await api.invoke('schedule:list'));
     api.onScheduleChanged((events) => renderList(events));

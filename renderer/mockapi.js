@@ -31,6 +31,7 @@ function createMockApi(seed = {}) {
       case 'dialog:openFile': return '/Users/you/Videos/class.mp4';
       case 'schedule:list': return events.slice();
       case 'schedule:add': { const ev = Object.assign({ id: 'mock' + (n++), status: 'pending', outcome: '', doneAt: 0 }, payload); events.push(ev); emit(); return { ...ev }; }
+      case 'schedule:update': { const ev = events.find((e) => e.id === (payload && payload.id)); if (!ev) return { ok: false, error: 'That broadcast was not found.' }; Object.assign(ev, (payload && payload.patch) || {}); emit(); return { ok: true, event: { ...ev } }; }
       case 'schedule:remove': { events = events.filter((e) => e.id !== payload); emit(); return { ok: true }; }
       case 'schedule:stop': return { ok: true };
       case 'update:check': return { hasUpdate: false };

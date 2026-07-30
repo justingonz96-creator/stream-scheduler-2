@@ -1,7 +1,7 @@
 'use strict';
 const { contextBridge, ipcRenderer } = require('electron');
 
-const ALLOWED = ['settings:get', 'settings:save', 'secret:hasPassword', 'secret:setPassword', 'portal:testLogin', 'portal:checkLink', 'probe:file', 'engine:selfCheck', 'schedule:list', 'schedule:add', 'schedule:remove', 'schedule:stop', 'dialog:openFile', 'update:check'];
+const ALLOWED = ['settings:get', 'settings:save', 'secret:hasPassword', 'secret:setPassword', 'portal:testLogin', 'portal:checkLink', 'probe:file', 'engine:selfCheck', 'schedule:list', 'schedule:add', 'schedule:update', 'schedule:remove', 'schedule:stop', 'dialog:openFile', 'update:check'];
 
 contextBridge.exposeInMainWorld('api', {
   invoke: (channel, payload) => {

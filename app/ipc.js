@@ -27,6 +27,7 @@ function createIpcHandlers({ settings, secrets, portal, scheduler, probe, ffmpeg
 
     'schedule:list': async () => scheduler.getEvents(),
     'schedule:add': async (ev) => scheduler.addEvent(ev || {}),
+    'schedule:update': async (p) => scheduler.updateEvent(String((p && p.id) || ''), (p && p.patch) || {}),
     'schedule:remove': async (id) => scheduler.removeEvent(String(id || '')),
     'schedule:stop': async (id) => scheduler.stopActive(String(id || '')),
 

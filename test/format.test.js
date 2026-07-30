@@ -51,3 +51,15 @@ test('fmtCountdown: due, minutes, hours, days', () => {
   assert.equal(F.fmtCountdown(((2 * 3600) + (14 * 60) + 9) * 1000), '2:14:09');
   assert.equal(F.fmtCountdown(((5 * 86400) + (3 * 3600)) * 1000), '5d 3h');
 });
+
+test('splitDateTime: inverse of parseDateTime (round-trips through the pickers)', () => {
+  const ms = F.parseDateTime('2026-07-04', '7', '30', 'PM');
+  assert.deepEqual(F.splitDateTime(ms), { date: '2026-07-04', hour: '7', min: '30', ap: 'PM' });
+  const midnight = F.parseDateTime('2026-01-09', '12', '05', 'AM');
+  assert.deepEqual(F.splitDateTime(midnight), { date: '2026-01-09', hour: '12', min: '05', ap: 'AM' });
+  const noon = F.parseDateTime('2026-12-25', '12', '00', 'PM');
+  assert.deepEqual(F.splitDateTime(noon), { date: '2026-12-25', hour: '12', min: '00', ap: 'PM' });
+  // and the full round trip back to the same instant
+  const s = F.splitDateTime(ms);
+  assert.equal(F.parseDateTime(s.date, s.hour, s.min, s.ap), ms);
+});

@@ -55,18 +55,25 @@
       <div id="restOfForm">
         <div class="field">
           <label class="flabel">2. When should the video start?</label>
-          <div class="row2">
-            <div><input type="date" id="evDate"><div class="fhint">Date</div></div>
-            <div>
-              <div class="timepick">
-                <select id="evHour" aria-label="Hour"><option value="">Hour</option></select>
-                <span class="tp-colon">:</span>
-                <select id="evMin" aria-label="Minutes"><option value="">Min</option></select>
-                <select id="evAP" aria-label="AM or PM"><option value="">—</option><option value="AM">AM</option><option value="PM">PM</option></select>
+          <select id="evWhen">
+            <option value="later">At a set date and time</option>
+            <option value="now">Start now — go live as soon as I save</option>
+          </select>
+          <div id="whenLater" style="margin-top:10px;">
+            <div class="row2">
+              <div><input type="date" id="evDate"><div class="fhint">Date</div></div>
+              <div>
+                <div class="timepick">
+                  <select id="evHour" aria-label="Hour"><option value="">Hour</option></select>
+                  <span class="tp-colon">:</span>
+                  <select id="evMin" aria-label="Minutes"><option value="">Min</option></select>
+                  <select id="evAP" aria-label="AM or PM"><option value="">—</option><option value="AM">AM</option><option value="PM">PM</option></select>
+                </div>
+                <div class="fhint">Start time</div>
               </div>
-              <div class="fhint">Start time</div>
             </div>
           </div>
+          <div class="pickstatus" id="whenNowHint"></div>
         </div>
 
         <div class="field">
