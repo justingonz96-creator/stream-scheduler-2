@@ -405,3 +405,17 @@ test('a drop DURING the slate (offset 0) resumes with the slate/lead, not straig
   assert.equal(h.spawned[1].opts.slateImage, 'slate.png', 'slate shown again on the resume');
   assert.equal(h.spawned[1].opts.resumeOffsetSec, 0);
 });
+
+test('scheduler.isSafeToUpdate delegates to the model (live event blocks)', async () => {
+  const h = harness({ events: [liveEvent()] });
+  h.setClock(70000); await h.sched.tick();
+  h.spawned[0].emit('playing');
+  const r = h.sched.isSafeToUpdate();
+  assert.equal(r.safe, false);
+  assert.match(r.reason, /live right now/i);
+});
+
+test('scheduler.isSafeToUpdate: safe with an empty/idle schedule', () => {
+  const h = harness({ events: [] });
+  assert.equal(h.sched.isSafeToUpdate().safe, true);
+});

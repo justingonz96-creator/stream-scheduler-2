@@ -3,7 +3,7 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const {
   GRACE_MS, MAX_RESUMES, normalizeEvent, streamAtOf, computeLeadSec,
-  plannedVideoEndAtMs, joinRtmpUrl, renewWeekly,
+  plannedVideoEndAtMs, joinRtmpUrl, renewWeekly, isSafeToUpdate,
 } = require('../schedule/model');
 
 test('constants', () => { assert.equal(GRACE_MS, 120000); assert.equal(MAX_RESUMES, 3); });
@@ -50,4 +50,62 @@ test('renewWeekly skips weeks already in the past relative to now', () => {
   const nv = renewWeekly(base, nowMs, () => 'N');
   assert.ok(nv.fireAt > nowMs + 60000, 'next occurrence is safely in the future');
   assert.equal((nv.fireAt - 1000) % (7 * 86400000), 0, 'still aligned to the weekly cadence');
+});
+
+test('isSafeToUpdate: unsafe while a broadcast is live/starting/preshow', () => {
+  const live = normalizeEvent({ id: 'l', status: 'playing', fireAt: 0, durationSec: 600 });
+  const r = isSafeToUpdate([live], 500000);
+  assert.equal(r.safe, false);
+  assert.match(r.reason, /live right now/i);
+  for (const status of ['starting', 'preshow']) {
+    const r2 = isSafeToUpdate([normalizeEvent({ id: 'x', status, fireAt: 0, durationSec: 600 })], 500000);
+    assert.equal(r2.safe, false, status + ' must block an update');
+  }
+});
+
+test('isSafeToUpdate: unsafe when a real (has-video) broadcast is due within the buffer', () => {
+  const soon = normalizeEvent({ id: 's', status: 'pending', fireAt: 1_000_000, filePath: '/v.mp4', durationSec: 600 });
+  // due in 10 minutes, default 15-minute buffer ⇒ unsafe
+  const r = isSafeToUpdate([soon], 1_000_000 - 10 * 60000);
+  assert.equal(r.safe, false);
+  assert.match(r.reason, /start soon/i);
+});
+
+test('isSafeToUpdate: safe when nothing is due for hours', () => {
+  const later = normalizeEvent({ id: 'f', status: 'pending', fireAt: 1_000_000, filePath: '/v.mp4', durationSec: 600 });
+  const r = isSafeToUpdate([later], 1_000_000 - 3 * 3600000);   // 3 hours out
+  assert.equal(r.safe, true);
+});
+
+test('isSafeToUpdate: a class already under way (late-start territory) still counts as unsafe until it would genuinely be over', () => {
+  const ev = normalizeEvent({ id: 'u', status: 'pending', fireAt: 1_000_000, filePath: '/v.mp4', durationSec: 600 });
+  // 5 minutes past fireAt, video still has 5 min of real content left ⇒ unsafe (it's about to catch-up and go live)
+  const r1 = isSafeToUpdate([ev], 1_000_000 + 5 * 60000);
+  assert.equal(r1.safe, false);
+  // 11 minutes past fireAt with only a 10-minute video ⇒ it would be marked missed, not started ⇒ safe
+  const r2 = isSafeToUpdate([ev], 1_000_000 + 11 * 60000);
+  assert.equal(r2.safe, true);
+});
+
+test('isSafeToUpdate: a weekly slot with no video yet can never block (it never goes live without one)', () => {
+  const empty = normalizeEvent({ id: 'w', status: 'pending', fireAt: 1_000_000, needsVideo: true, filePath: '', durationSec: 0 });
+  const r = isSafeToUpdate([empty], 1_000_000 - 60000);   // due in 1 minute, well inside the buffer
+  assert.equal(r.safe, true);
+});
+
+test('isSafeToUpdate: done/failed/missed events never block', () => {
+  const done = normalizeEvent({ id: 'd', status: 'done', fireAt: 1_000_000, durationSec: 600 });
+  const r = isSafeToUpdate([done], 1_000_000 + 1000);
+  assert.equal(r.safe, true);
+});
+
+test('isSafeToUpdate: an empty schedule is always safe', () => {
+  assert.equal(isSafeToUpdate([], Date.now()).safe, true);
+});
+
+test('isSafeToUpdate: the lookahead buffer is configurable', () => {
+  const ev = normalizeEvent({ id: 'b', status: 'pending', fireAt: 1_000_000, filePath: '/v.mp4', durationSec: 600 });
+  const now = 1_000_000 - 20 * 60000;   // 20 minutes out
+  assert.equal(isSafeToUpdate([ev], now).safe, true, 'default 15-min buffer: 20 min out is safe');
+  assert.equal(isSafeToUpdate([ev], now, 30 * 60000).safe, false, 'a wider 30-min buffer catches it');
 });

@@ -191,6 +191,24 @@
     #liveBar button { width: 100%; }
   }
 
+  /* UPDATE bar — only ever shown once a download has finished */
+  #updateBar {
+    display: flex; margin-top: var(--sp-4); border-radius: 14px; padding: var(--sp-4) var(--sp-5);
+    background: linear-gradient(100deg, var(--accent-strong), var(--accent)); color: #fff;
+    align-items: center; gap: var(--sp-3); flex-wrap: wrap;
+    box-shadow: 0 16px 38px -16px var(--accent-glow), var(--shadow-sm);
+  }
+  #updateBar.blocked { background: linear-gradient(100deg, #6b7280, #4b5563); }
+  #updateBar .updatedot { width: 10px; height: 10px; border-radius: 50%; background: #fff; flex-shrink: 0; }
+  #updateBar .updatetext { font-weight: 600; flex: 1 1 auto; min-width: 0; }
+  #updateBar button { background: rgba(255,255,255,0.18); color: #fff; font-size: var(--fs-1); padding: 8px 14px; flex-shrink: 0; }
+  #updateBar button:hover:not(:disabled) { background: rgba(255,255,255,0.3); }
+  #updateBar button:disabled { opacity: 0.55; cursor: default; }
+  @media (max-width: 420px) {
+    #updateBar .spacer { display: none; }
+    #updateBar button { width: 100%; }
+  }
+
   /* Next-up hero */
   /* ===== Focal card — one adaptive element: idle / next-up / live ===== */
   #heroCard { background:

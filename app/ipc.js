@@ -31,7 +31,12 @@ function createIpcHandlers({ settings, secrets, portal, scheduler, probe, ffmpeg
     'schedule:remove': async (id) => scheduler.removeEvent(String(id || '')),
     'schedule:stop': async (id) => scheduler.stopActive(String(id || '')),
 
-    'update:check': async () => updates.check(),
+    // getState is synchronous main-process state (electron-updater's own event
+    // state + a fresh scheduler.isSafeToUpdate() check) — install re-validates
+    // safety itself server-side rather than trusting whatever the renderer cached.
+    'update:getState': async () => updates.getState(),
+    'update:install': async () => updates.install(),
+    'update:showDownload': async () => updates.showDownload(),
   };
 }
 

@@ -6,7 +6,7 @@
 // injected; with fakes this whole file runs offline under node:test.
 const {
   GRACE_MS, MAX_RESUMES, normalizeEvent, streamAtOf, computeLeadSec,
-  plannedVideoEndAtMs, joinRtmpUrl, renewWeekly,
+  plannedVideoEndAtMs, joinRtmpUrl, renewWeekly, isSafeToUpdate,
 } = require('./model');
 
 function createScheduler({ store, portal, engineFactory, settings, now = () => Date.now(), genId, log = () => {} }) {
@@ -280,7 +280,9 @@ function createScheduler({ store, portal, engineFactory, settings, now = () => D
     try { if (bc) bc.stop(); } catch {}
   }
 
-  return { tick, start, stop, shutdown, getEvents, addEvent, updateEvent, removeEvent, stopActive, onChanged };
+  function safeToUpdate() { return isSafeToUpdate(events, now()); }
+
+  return { tick, start, stop, shutdown, getEvents, addEvent, updateEvent, removeEvent, stopActive, onChanged, isSafeToUpdate: safeToUpdate };
 }
 
 module.exports = { createScheduler };

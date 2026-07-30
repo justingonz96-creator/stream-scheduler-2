@@ -15,6 +15,13 @@ function createMockApi(seed = {}) {
   const emit = () => { for (const f of listeners) { try { f(events.slice()); } catch {} } };
   const firstGuid = (s) => (String(s).match(/[0-9a-fA-F-]{36}/) || [''])[0];
 
+  // Self-update preview state — real main.js drives this from electron-updater
+  // events + scheduler.isSafeToUpdate(); the mock lets the UI be exercised
+  // through every phase without a real download.
+  let updateState = Object.assign({ phase: 'idle', version: '', error: '', safe: true, reason: '', afterInstall: false, downloadedFile: '' }, seed.updateState || {});
+  const updateListeners = new Set();
+  const emitUpdate = () => { for (const f of updateListeners) { try { f({ ...updateState }); } catch {} } };
+
   async function invoke(channel, payload) {
     switch (channel) {
       case 'settings:get': return { ...settings };
@@ -34,11 +41,27 @@ function createMockApi(seed = {}) {
       case 'schedule:update': { const ev = events.find((e) => e.id === (payload && payload.id)); if (!ev) return { ok: false, error: 'That broadcast was not found.' }; Object.assign(ev, (payload && payload.patch) || {}); emit(); return { ok: true, event: { ...ev } }; }
       case 'schedule:remove': { events = events.filter((e) => e.id !== payload); emit(); return { ok: true }; }
       case 'schedule:stop': return { ok: true };
-      case 'update:check': return { hasUpdate: false };
+      case 'update:getState': return { ...updateState };
+      case 'update:install': {
+        if (!updateState.safe) return { ok: false, error: updateState.reason };
+        updateState = { phase: 'idle', version: '', error: '', safe: true, reason: '', afterInstall: false, downloadedFile: '' };
+        emitUpdate();
+        return { ok: true };
+      }
+      case 'update:showDownload': {
+        if (!updateState.downloadedFile) return { ok: false, error: 'Nothing has been downloaded yet.' };
+        return { ok: true };
+      }
       default: return { ok: false, error: 'unknown channel: ' + channel };
     }
   }
-  return { invoke, onScheduleChanged: (cb) => { listeners.add(cb); return () => listeners.delete(cb); }, _emitChange: emit };
+  return {
+    invoke,
+    onScheduleChanged: (cb) => { listeners.add(cb); return () => listeners.delete(cb); },
+    onUpdateChanged: (cb) => { updateListeners.add(cb); return () => updateListeners.delete(cb); },
+    _emitChange: emit,
+    _setUpdateState: (patch) => { updateState = { ...updateState, ...patch }; emitUpdate(); },
+  };
 }
 
 function installMockApi(global) {

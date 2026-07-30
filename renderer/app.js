@@ -151,6 +151,40 @@ if (typeof document !== 'undefined') {
     hero.innerHTML = '<div class="fc-idle">Nothing scheduled yet — press <b>+ Schedule a video</b> to put a class on the calendar.</div>';
   }
 
+  // Silent through checking/downloading/error — only surfaced once there's an
+  // actual decision for the operator to make (install now, or see why not).
+  function renderUpdate(state) {
+    const bar = $('updateBar');
+    if (!state) { bar.className = 'hidden'; return; }
+    // A failed install (e.g. this computer's copy can't verify itself) still
+    // leaves the scheduler running — say so, don't just go quiet. The file is
+    // already downloaded, though, so offer to reveal it instead of a dead end.
+    if (state.phase === 'error' && state.afterInstall) {
+      bar.className = 'blocked';
+      const btn = $('btnUpdateNow'); btn.dataset.action = 'reveal';
+      if (state.downloadedFile) {
+        $('updateText').textContent = 'The update could not be installed automatically (' + (state.error || 'unknown error') + '). The schedule is still running. The download is already on this computer — open it and drag it into Applications yourself.';
+        btn.disabled = false; btn.textContent = 'Show the downloaded file'; btn.title = '';
+      } else {
+        $('updateText').textContent = 'The update could not be installed (' + (state.error || 'unknown error') + '). The schedule is still running — try again later, or update this computer by hand.';
+        btn.disabled = true; btn.textContent = 'Show the downloaded file'; btn.title = '';
+      }
+      return;
+    }
+    if (state.phase !== 'downloaded') { bar.className = 'hidden'; return; }
+    const version = state.version ? 'v' + state.version : 'A new version';
+    const btn = $('btnUpdateNow'); btn.dataset.action = 'install'; btn.textContent = 'Restart & Update';
+    if (state.safe) {
+      bar.className = '';
+      $('updateText').textContent = version + ' is ready — restart to finish updating.';
+      btn.disabled = false; btn.title = '';
+    } else {
+      bar.className = 'blocked';
+      $('updateText').textContent = version + ' is ready, but not yet — ' + state.reason + '.';
+      btn.disabled = true; btn.title = state.reason;
+    }
+  }
+
   function renderList(events) {
     lastEvents = events.slice();
     renderHero();
@@ -273,12 +307,15 @@ if (typeof document !== 'undefined') {
     if (!chk.ok) { $('alertBar').textContent = '⚠ The video engine isn\'t ready: ' + (chk.error || '') ; $('alertBar').className = 'alert bad'; }
     $('engineStatus').textContent = chk.ok ? ('Video engine ready — ' + (chk.version || 'bundled FFmpeg')) : ('Video engine problem: ' + (chk.error || ''));
     $('engineStatus').className = chk.ok ? 'setup-sub' : 'setup-sub bad';
-    // update notice (spec §8): silent no-op on any failure — fire-and-forget, so a
-    // firewalled network can never stall the button wiring below.
-    api.invoke('update:check').then((upd) => {
-      // Never clobber a more important engine-failure alert with the update notice.
-      if (upd && upd.hasUpdate && $('alertBar').className !== 'alert bad') { $('alertBar').textContent = 'A newer version (v' + upd.latestVersion + ') is available — ask the admin to update this computer.'; $('alertBar').className = 'alert warn'; }
-    }).catch(() => {});
+    // self-update: reflect whatever main already knows, then stay live via the
+    // push channel plus the clock tick (below) for the safety gate's own drift.
+    renderUpdate(await api.invoke('update:getState'));
+    api.onUpdateChanged((state) => renderUpdate(state));
+    $('btnUpdateNow').onclick = async () => {
+      if ($('btnUpdateNow').dataset.action === 'reveal') { await api.invoke('update:showDownload'); return; }
+      const r = await api.invoke('update:install');
+      if (!r || !r.ok) renderUpdate(await api.invoke('update:getState'));
+    };
     // wire buttons
     $('btnNew').onclick = showForm; $('btnCancel').onclick = hideForm;
     $('btnPickVideo').onclick = pickVideo; $('btnChangeVideo').onclick = () => { form.filePath = ''; form.durationSec = 0; $('fileCheck').textContent = ''; applyPhase(); };
@@ -298,6 +335,9 @@ if (typeof document !== 'undefined') {
     setInterval(() => {
       $('clockNow').textContent = F.fmtClock(Date.now()); renderHero();
       if (form.startNow && !$('formCard').className.includes('hidden')) updateWhenUI();   // keep "video starts about …" honest
+      // the safety gate depends on wall-clock time, not just schedule content —
+      // re-check it each tick so a blocked reason clears itself once it passes.
+      if ($('updateBar').className !== 'hidden') api.invoke('update:getState').then(renderUpdate);
     }, 1000); $('clockNow').textContent = F.fmtClock(Date.now());
     // schedule
     renderList(await api.invoke('schedule:list'));

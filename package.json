@@ -1,7 +1,7 @@
 {
   "name": "stream-scheduler-2",
   "productName": "Stream Scheduler 2",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "private": true,
   "main": "app/main.js",
   "scripts": {
@@ -22,7 +22,12 @@
   "build": {
     "appId": "com.echelonfit.stream-scheduler2",
     "productName": "Stream Scheduler 2",
-    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "artifactName": "${name}-${version}-${os}-${arch}.${ext}",
+    "publish": {
+      "provider": "github",
+      "owner": "justingonz96-creator",
+      "repo": "stream-scheduler-2"
+    },
     "files": [
       "app/**",
       "engine/**",
@@ -86,5 +91,8 @@
       "allowToChangeInstallationDirectory": true,
       "perMachine": false
     }
+  },
+  "dependencies": {
+    "electron-updater": "6.8.9"
   }
 }

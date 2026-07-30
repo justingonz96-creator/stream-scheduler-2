@@ -38,7 +38,25 @@ function renewWeekly(ev, nowMs, genId) {
   });
 }
 
+// Is it safe for the app to quit-and-relaunch itself right now (a pending
+// self-update)? Reuses the SAME "is this class still catchable" arithmetic as
+// the late-start feature (schedule/scheduler.js) so the two stay consistent:
+// a class that's due, live, or still within its own late-start catch-up window
+// blocks the update; a weekly slot with no video yet can never block (it can't
+// go live without one); anything already finished never blocks.
+function isSafeToUpdate(events, nowMs, bufferMs = 15 * 60 * 1000) {
+  const live = events.find((e) => ['starting', 'preshow', 'playing'].includes(e.status));
+  if (live) return { safe: false, reason: 'a broadcast is live right now' };
+  const imminent = events.find((e) => {
+    if (e.status !== 'pending' || e.needsVideo) return false;
+    if (e.fireAt - nowMs > bufferMs) return false;                 // not due soon enough to matter
+    return e.durationSec > 0 ? (nowMs - e.fireAt) < e.durationSec * 1000 : (nowMs - e.fireAt) <= GRACE_MS;
+  });
+  if (imminent) return { safe: false, reason: 'a broadcast is scheduled to start soon' };
+  return { safe: true, reason: '' };
+}
+
 module.exports = {
   GRACE_MS, MAX_RESUMES, normalizeEvent, streamAtOf, computeLeadSec,
-  plannedVideoEndAtMs, joinRtmpUrl, renewWeekly,
+  plannedVideoEndAtMs, joinRtmpUrl, renewWeekly, isSafeToUpdate,
 };

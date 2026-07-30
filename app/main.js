@@ -1,6 +1,6 @@
 'use strict';
 const path = require('node:path');
-const { app, BrowserWindow, ipcMain, safeStorage, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, safeStorage, dialog, shell } = require('electron');
 const { appDataDir } = require('../store/appdata');
 const { createSettingsStore, buildPortalConfig } = require('../store/settings');
 const { createScheduleStore } = require('../store/schedule-store');
@@ -10,7 +10,8 @@ const { createTransport } = require('../portal/http');
 const { createPortalClient } = require('../portal/client');
 const { createScheduler } = require('../schedule/scheduler');
 const { createIpcHandlers } = require('./ipc');
-const { checkForUpdate } = require('../store/update-check');
+const { autoUpdater } = require('electron-updater');
+const { createUpdateController } = require('../store/updater');
 const ffmpeg = require('../engine/ffmpeg');
 const probe = require('../engine/probe');
 const { Broadcast } = require('../engine/broadcast');
@@ -57,7 +58,14 @@ if (process.argv.includes('--selfcheck')) {
       genId: () => 'ev' + Date.now() + '-' + (idc++),
       log: (m) => console.log('[sched] ' + m),
     });
-    const updates = { check: () => checkForUpdate({ currentVersion: app.getVersion(), fetchImpl: fetch }) };
+    autoUpdater.autoDownload = true;
+    autoUpdater.autoInstallOnAppQuit = false;
+    const updateCtl = createUpdateController({
+      autoUpdater, scheduler, shell,
+      onChanged: (state) => { if (!win.isDestroyed()) win.webContents.send('update:changed', state); },
+      log: (m) => console.log('[update] ' + m),
+    });
+    const updates = { getState: () => updateCtl.getState(), install: () => updateCtl.install(), showDownload: () => updateCtl.showDownload() };
     const handlers = createIpcHandlers({ settings, secrets, portal, scheduler, probe, ffmpeg, updates });
     for (const [channel, fn] of Object.entries(handlers)) {
       ipcMain.handle(channel, (_e, payload) => fn(payload));
@@ -74,6 +82,9 @@ if (process.argv.includes('--selfcheck')) {
     });
     scheduler.onChanged((events) => { if (!win.isDestroyed()) win.webContents.send('schedule:changed', events); });
     scheduler.start();
+    // Skip in dev/test runs: an unpacked app has no app-update.yml and
+    // electron-updater's checkForUpdates() only ever errors there.
+    if (app.isPackaged) updateCtl.start();
   }
   app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
   app.whenReady().then(createWindow);

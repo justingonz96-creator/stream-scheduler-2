@@ -25,6 +25,15 @@
     <span class="livesub" id="liveSub"></span>
   </div>
 
+  <!-- Only ever shown once an update has finished downloading — silent through
+       checking/downloading so it never nags about background activity. -->
+  <div id="updateBar" class="hidden">
+    <span class="updatedot"></span>
+    <span class="updatetext" id="updateText"></span>
+    <span class="spacer"></span>
+    <button id="btnUpdateNow">Restart &amp; Update</button>
+  </div>
+
   <!-- ========= MAIN VIEW ========= -->
   <div id="viewMain">
     <div class="card" id="heroCard"></div>

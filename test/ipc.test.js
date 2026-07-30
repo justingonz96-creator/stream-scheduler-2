@@ -35,7 +35,7 @@ function handlers(over = {}) {
     },
     probe: { probeFile: async (p) => ({ ok: true, durationSec: 10, width: 1920, height: 1080, _p: p }) },
     ffmpeg: { selfCheck: async () => ({ ok: true, version: 'x' }) },
-    updates: { check: async () => ({ hasUpdate: false }) },
+    updates: { getState: () => ({ phase: 'idle', version: '', error: '', safe: true, reason: '' }), install: async () => ({ ok: true }), showDownload: async () => ({ ok: true }) },
   };
   return { h: createIpcHandlers({ ...base, ...over }), calls };
 }
@@ -46,7 +46,7 @@ test('handler map covers exactly the expected channels', () => {
     'engine:selfCheck', 'portal:checkLink', 'portal:testLogin', 'probe:file',
     'schedule:add', 'schedule:list', 'schedule:remove', 'schedule:stop', 'schedule:update',
     'secret:hasPassword', 'secret:setPassword', 'settings:get', 'settings:save',
-    'update:check',
+    'update:getState', 'update:install', 'update:showDownload',
   ].sort());
 });
 
@@ -85,4 +85,28 @@ test('schedule + probe + selfCheck handlers delegate correctly', async () => {
   await h['schedule:stop']('e1'); assert.equal(calls.stop[0], 'e1');
   assert.equal((await h['probe:file']('/v.mp4')).durationSec, 10);
   assert.equal((await h['engine:selfCheck']()).ok, true);
+});
+
+test('update:getState/install delegate to the injected updates object (main.js owns the real logic)', async () => {
+  const install = { called: false };
+  const { h } = handlers({ updates: {
+    getState: () => ({ phase: 'downloaded', version: '9.9.9', error: '', safe: false, reason: 'a broadcast is scheduled to start soon' }),
+    install: async () => { install.called = true; return { ok: false, error: 'a broadcast is scheduled to start soon' }; },
+  } });
+  const state = await h['update:getState']();
+  assert.equal(state.phase, 'downloaded'); assert.equal(state.version, '9.9.9'); assert.equal(state.safe, false);
+  const r = await h['update:install']();
+  assert.equal(install.called, true);
+  assert.equal(r.ok, false); assert.match(r.error, /start soon/i);
+});
+
+test('update:showDownload delegates to the injected updates object', async () => {
+  const calls = [];
+  const { h } = handlers({ updates: {
+    getState: () => ({}), install: async () => ({ ok: true }),
+    showDownload: async () => { calls.push(1); return { ok: true }; },
+  } });
+  const r = await h['update:showDownload']();
+  assert.equal(calls.length, 1);
+  assert.equal(r.ok, true);
 });
