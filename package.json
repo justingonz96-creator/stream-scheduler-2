@@ -1,7 +1,7 @@
 {
   "name": "stream-scheduler-2",
   "productName": "Stream Scheduler 2",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "private": true,
   "main": "app/main.js",
   "scripts": {
@@ -13,9 +13,11 @@
     "rehearsal:brain": "node scripts/brain-rehearsal.js",
     "dist:mac": "electron-builder --mac",
     "dist:win": "electron-builder --win",
+    "release:mac": "bash scripts/release-mac.sh",
     "rehearsal:pacing": "node scripts/rehearsal-pacing.js"
   },
   "devDependencies": {
+    "@electron/notarize": "^2.5.0",
     "electron": "^43.0.0",
     "electron-builder": "^26.15.3"
   },
@@ -39,6 +41,7 @@
     ],
     "asar": true,
     "npmRebuild": false,
+    "afterSign": "build/notarize.js",
     "mac": {
       "target": [
         {
@@ -55,6 +58,10 @@
         }
       ],
       "category": "public.app-category.video",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
       "extraResources": [
         {
           "from": "resources/ffmpeg/mac-arm64",

@@ -5,7 +5,8 @@
 const { readJson, writeJsonAtomic } = require('./jsonstore');
 
 const DEFAULT_SETTINGS = {
-  slateImage: '',        // path to the slate picture shown during the lead-in
+  slateImage: '',        // path to the 16:9 slate picture shown during the lead-in
+  slateImageVertical: '', // path to the 9:16 slate, used when the class is vertical
   slateMusic: '',        // path to the looping MP3 played under the slate
   fadeMs: 1000,          // slate→video crossfade length (ms)
   videoBitrate: 6000,    // kbps

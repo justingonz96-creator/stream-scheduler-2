@@ -6,7 +6,7 @@
 // injected; with fakes this whole file runs offline under node:test.
 const {
   GRACE_MS, MAX_RESUMES, normalizeEvent, streamAtOf, computeLeadSec,
-  plannedVideoEndAtMs, joinRtmpUrl, renewWeekly, isSafeToUpdate,
+  plannedVideoEndAtMs, joinRtmpUrl, renewWeekly, isSafeToUpdate, resolveSlateImage,
 } = require('./model');
 
 function createScheduler({ store, portal, engineFactory, settings, now = () => Date.now(), genId, log = () => {} }) {
@@ -78,12 +78,15 @@ function createScheduler({ store, portal, engineFactory, settings, now = () => D
 
   function spawn(ev, { leadSec, resumeOffsetSec, target, retried, resumeCount }) {
     const s = settings.get();
-    const useSlate = leadSec > 0 && !!s.slateImage;
+    // Match the slate to the class shape (the SAME target.vertical the canvas
+    // uses), so a vertical class gets the 9:16 slate and never a letterboxed one.
+    const slateImage = resolveSlateImage(s, !!target.vertical);
+    const useSlate = leadSec > 0 && !!slateImage;
     const bc = engineFactory({
       videoPath: ev.filePath, vertical: !!target.vertical, bitrateKbps: s.videoBitrate, fps: 30,
       leadSec: useSlate ? leadSec : 0,
       fadeSec: (s.fadeMs || 0) / 1000,
-      slateImage: useSlate ? s.slateImage : '', slateMusic: useSlate ? s.slateMusic : '',
+      slateImage: useSlate ? slateImage : '', slateMusic: useSlate ? s.slateMusic : '',
       resumeOffsetSec, outUrl: joinRtmpUrl(target.server, target.key),
     });
     active = { eventId: ev.id, broadcast: bc, target, sawPlaying: false, retried, resumeCount };
@@ -175,7 +178,8 @@ function createScheduler({ store, portal, engineFactory, settings, now = () => D
 
   async function tick() {
     const t = now();
-    const hasSlate = !!settings.get().slateImage;
+    const sset = settings.get();
+    const hasSlate = !!(sset.slateImage || sset.slateImageVertical);
     for (const ev of events) {
       if (ev.status !== 'pending') continue;
       const streamAt = hasSlate ? streamAtOf(ev) : ev.fireAt;

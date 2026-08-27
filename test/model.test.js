@@ -3,10 +3,27 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const {
   GRACE_MS, MAX_RESUMES, normalizeEvent, streamAtOf, computeLeadSec,
-  plannedVideoEndAtMs, joinRtmpUrl, renewWeekly, isSafeToUpdate,
+  plannedVideoEndAtMs, joinRtmpUrl, renewWeekly, isSafeToUpdate, resolveSlateImage,
 } = require('../schedule/model');
 
 test('constants', () => { assert.equal(GRACE_MS, 120000); assert.equal(MAX_RESUMES, 3); });
+
+test('resolveSlateImage: each orientation prefers its own slate', () => {
+  const s = { slateImage: '/wide.png', slateImageVertical: '/tall.png' };
+  assert.equal(resolveSlateImage(s, false), '/wide.png');
+  assert.equal(resolveSlateImage(s, true), '/tall.png');
+});
+
+test('resolveSlateImage: falls back to the other slate when only one is set', () => {
+  assert.equal(resolveSlateImage({ slateImage: '/wide.png' }, true), '/wide.png', 'vertical falls back to the 16:9 slate');
+  assert.equal(resolveSlateImage({ slateImageVertical: '/tall.png' }, false), '/tall.png', 'landscape falls back to the 9:16 slate');
+});
+
+test('resolveSlateImage: no slate configured ⇒ empty string, tolerates missing settings', () => {
+  assert.equal(resolveSlateImage({}, true), '');
+  assert.equal(resolveSlateImage({}, false), '');
+  assert.equal(resolveSlateImage(undefined, true), '');
+});
 
 test('normalizeEvent fills the full default shape and keeps given fields', () => {
   const ev = normalizeEvent({ id: 'x', fireAt: 1000, title: 'Yoga' });

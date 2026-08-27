@@ -5,7 +5,7 @@
 // real window.api exists.
 function createMockApi(seed = {}) {
   const settings = Object.assign({
-    slateImage: '', slateMusic: '', fadeMs: 1000, videoBitrate: 6000,
+    slateImage: '', slateImageVertical: '', slateMusic: '', fadeMs: 1000, videoBitrate: 6000,
     portalEmail: '', portalApiKey: '', portalApiBase: '',
   }, seed.settings || {});
   let events = (seed.events || []).slice();

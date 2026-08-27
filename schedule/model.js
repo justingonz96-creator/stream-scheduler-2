@@ -56,7 +56,18 @@ function isSafeToUpdate(events, nowMs, bufferMs = 15 * 60 * 1000) {
   return { safe: true, reason: '' };
 }
 
+// Which slate picture to show for a class of the given orientation. Prefers the
+// slate that matches the class shape, but falls back to the other one when only
+// one is configured — so setting a single slate keeps behaving exactly as before
+// (non-breaking), and adding the second slate is purely additive.
+function resolveSlateImage(settings, vertical) {
+  const s = settings || {};
+  return vertical
+    ? (s.slateImageVertical || s.slateImage || '')
+    : (s.slateImage || s.slateImageVertical || '');
+}
+
 module.exports = {
   GRACE_MS, MAX_RESUMES, normalizeEvent, streamAtOf, computeLeadSec,
-  plannedVideoEndAtMs, joinRtmpUrl, renewWeekly, isSafeToUpdate,
+  plannedVideoEndAtMs, joinRtmpUrl, renewWeekly, isSafeToUpdate, resolveSlateImage,
 };

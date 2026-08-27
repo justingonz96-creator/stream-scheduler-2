@@ -95,7 +95,9 @@
     background-image: radial-gradient(1100px 520px at 50% -8%, var(--bg-glow), transparent 72%);
     background-attachment: fixed;
     color: var(--ink);
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    /* System UI stack — 'Inter' was never bundled or loaded, so it silently fell
+       back to this anyway; naming it honestly avoids a phantom dependency. */
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     font-size: var(--fs-3);
     line-height: 1.5;
     letter-spacing: -0.006em;
@@ -112,7 +114,7 @@
     display: flex; align-items: center; gap: var(--sp-2);
     flex-wrap: wrap; padding: 14px 4px 6px;
   }
-  .logo { font-size: var(--fs-5); font-weight: 800; letter-spacing: -0.5px; }
+  .logo { font-size: var(--fs-5); font-weight: 800; letter-spacing: -0.5px; margin: 0; }
   .logo .dot { color: var(--accent); }
   .spacer { flex: 1; }
 
@@ -183,27 +185,35 @@
   #liveBar .livedot { width: 12px; height: 12px; border-radius: 50%; background: #fff; animation: breathe 1.2s infinite; flex-shrink: 0; }
   #liveBar .livetext { font-weight: 700; flex: 1 1 auto; min-width: 0; }
   #liveBar .livesub { opacity: 0.9; font-size: var(--fs-1); width: 100%; }
-  #liveBar button { background: rgba(255,255,255,0.18); color: #fff; font-size: var(--fs-1); padding: 8px 14px; flex-shrink: 0; }
-  #liveBar button:hover { background: rgba(255,255,255,0.3); }
+  /* Solid dark wash (not translucent white) so "End stream now" stays readable on
+     the red bar, and hover DARKENS — the expected "more prominent" direction. */
+  #liveBar button { background: rgba(0,0,0,0.24); color: #fff; font-size: var(--fs-1); padding: 8px 14px; flex-shrink: 0; }
+  #liveBar button:hover { background: rgba(0,0,0,0.38); }
   /* In a narrow dock the End-stream button drops to its own full-width line. */
   @media (max-width: 420px) {
     #liveBar .spacer { display: none; }
     #liveBar button { width: 100%; }
   }
 
-  /* UPDATE bar — only ever shown once a download has finished */
+  /* UPDATE bar — only ever shown once a download has finished.
+     In dark mode the accent is a LIGHT cyan, so white text on it is unreadable
+     (~1.5:1). Use --on-accent (dark ink in dark theme, white in light) so the
+     "ready — restart" text and its button clear contrast in BOTH themes. The grey
+     "blocked" state keeps white text (grey is dark in both themes). */
   #updateBar {
     display: flex; margin-top: var(--sp-4); border-radius: 14px; padding: var(--sp-4) var(--sp-5);
-    background: linear-gradient(100deg, var(--accent-strong), var(--accent)); color: #fff;
+    background: linear-gradient(100deg, var(--accent-strong), var(--accent)); color: var(--on-accent);
     align-items: center; gap: var(--sp-3); flex-wrap: wrap;
     box-shadow: 0 16px 38px -16px var(--accent-glow), var(--shadow-sm);
   }
-  #updateBar.blocked { background: linear-gradient(100deg, #6b7280, #4b5563); }
-  #updateBar .updatedot { width: 10px; height: 10px; border-radius: 50%; background: #fff; flex-shrink: 0; }
+  #updateBar.blocked { background: linear-gradient(100deg, #6b7280, #4b5563); color: #fff; }
+  #updateBar .updatedot { width: 10px; height: 10px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
   #updateBar .updatetext { font-weight: 600; flex: 1 1 auto; min-width: 0; }
-  #updateBar button { background: rgba(255,255,255,0.18); color: #fff; font-size: var(--fs-1); padding: 8px 14px; flex-shrink: 0; }
-  #updateBar button:hover:not(:disabled) { background: rgba(255,255,255,0.3); }
+  #updateBar button { background: rgba(0,0,0,0.16); color: var(--on-accent); font-size: var(--fs-1); padding: 8px 14px; flex-shrink: 0; }
+  #updateBar button:hover:not(:disabled) { background: rgba(0,0,0,0.28); }
   #updateBar button:disabled { opacity: 0.55; cursor: default; }
+  #updateBar.blocked button { color: #fff; background: rgba(0,0,0,0.24); }
+  #updateBar.blocked button:hover:not(:disabled) { background: rgba(0,0,0,0.36); }
   @media (max-width: 420px) {
     #updateBar .spacer { display: none; }
     #updateBar button { width: 100%; }
@@ -225,11 +235,14 @@
   .fc-eye { display: inline-flex; align-items: center; gap: 7px; font-size: 11px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; color: var(--accent); }
   #heroCard.is-live .fc-eye { color: var(--bad); }
   .fc-title { font-size: 22px; font-weight: 700; letter-spacing: -0.4px; line-height: 1.15; margin: 9px 0 0; overflow-wrap: anywhere; text-wrap: balance; }
-  .fc-count { font-family: 'Inter Tight', 'Inter', sans-serif; font-size: clamp(40px, 12.5vw, 60px); font-weight: 600; letter-spacing: -2px; line-height: 1; margin: 8px 0 0;
+  .fc-count { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; font-size: clamp(40px, 12.5vw, 60px); font-weight: 600; letter-spacing: -2px; line-height: 1; margin: 8px 0 0;
     color: var(--accent); font-variant-numeric: tabular-nums; text-shadow: 0 0 22px var(--accent-glow), 0 0 52px var(--accent-glow); }
   :root[data-theme="dark"] .fc-count { color: #eafffe; }
   #heroCard.is-live .fc-count { color: var(--ink); text-shadow: 0 0 22px rgba(255,77,94,0.35); }
   .fc-meta { font-size: 12.5px; color: var(--ink-soft); font-weight: 500; margin-top: 11px; }
+  /* Secondary hero facts (slate / ends) — one quiet tier below the date+time, so
+     the line isn't five equally-weighted facts crammed together. */
+  .fc-meta-2 { font-size: 12px; color: var(--ink-soft); font-weight: 500; opacity: 0.82; margin-top: 3px; }
   .fc-idle { font-size: var(--fs-4); color: var(--ink-soft); font-weight: 500; padding: 2px 0; }
   .fc-idle b { color: var(--ink); font-weight: 700; }
   .fc-warn { font-size: 13.5px; font-weight: 600; color: var(--warn); margin-top: 12px; }
@@ -411,9 +424,19 @@
 .form-dim { opacity: 0.45; pointer-events: none; filter: saturate(0.6); }
 
 /* ---- Schedule rows + pills + alert bar (these elements are built by app.js, so their classes need styling even though 1.x rendered rows differently) ---- */
-.schedrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 14px; background: var(--card); box-shadow: var(--shadow-sm); border-radius: 12px; margin-bottom: 8px; }
-.schedrow .meta { color: var(--ink-soft); font-size: var(--fs-1); }
-.schedrow button { margin-left: auto; }
+/* Stable two-part row: a min-width:0 content column that wraps/truncates, and a
+   fixed action group — so rows keep a consistent shape and a long file name can
+   never overflow the window or shove the Edit/Remove buttons off-screen. */
+.schedrow { display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: var(--card); box-shadow: var(--shadow-sm); border-radius: 12px; margin-bottom: 8px; }
+.schedrow .smain { flex: 1; min-width: 0; }
+.schedrow .stitle { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.schedrow .stitle b { font-weight: 700; overflow-wrap: anywhere; min-width: 0; }
+.schedrow .ssub { color: var(--ink-soft); font-size: var(--fs-1); margin-top: 3px; overflow-wrap: anywhere; }
+.schedrow .sacts { display: flex; gap: 6px; flex-shrink: 0; }
+@media (max-width: 420px) {
+  .schedrow .sacts { flex: 1 1 100%; justify-content: flex-end; margin-top: 8px; }
+  .schedrow { flex-wrap: wrap; }
+}
 .pill { padding: 3px 10px; border-radius: 999px; font-size: var(--fs-1); font-weight: 700; background: var(--chip); }
 .pill.live { background: var(--bad-soft); color: var(--bad); }
 .pill.preshow { background: var(--warn-soft); color: var(--warn); }

@@ -77,12 +77,17 @@ if (typeof document !== 'undefined') {
   }
 
   async function checkLink() {
-    const r = await api.invoke('portal:checkLink', $('evPortalLink').value.trim());
-    if (!r.ok) { $('evPortalStatus').textContent = '✗ ' + r.error; $('evPortalStatus').className = 'pickstatus bad'; form.linkChecked = false; applyPhase(); return; }
-    form.contentItemGuid = r.contentItemGuid; form.scheduleGuid = r.scheduleGuid || ''; form.vertical = r.vertical; form.linkChecked = true;
-    form.stationName = (r.picked && r.picked.stationName) || '';
-    $('evPortalStatus').textContent = '✓ ' + (r.picked && r.picked.stationName ? r.picked.stationName + ' · ' : '') + F.orientationLabel(r.vertical);
-    $('evPortalStatus').className = 'pickstatus good'; applyPhase();
+    // Acknowledge the wait (neutral, no leftover green/red) and block re-presses.
+    $('btnEvPortalCheck').disabled = true;
+    $('evPortalStatus').textContent = 'Checking…'; $('evPortalStatus').className = 'pickstatus';
+    try {
+      const r = await api.invoke('portal:checkLink', $('evPortalLink').value.trim());
+      if (!r.ok) { $('evPortalStatus').textContent = '✗ ' + r.error; $('evPortalStatus').className = 'pickstatus bad'; form.linkChecked = false; applyPhase(); return; }
+      form.contentItemGuid = r.contentItemGuid; form.scheduleGuid = r.scheduleGuid || ''; form.vertical = r.vertical; form.linkChecked = true;
+      form.stationName = (r.picked && r.picked.stationName) || '';
+      $('evPortalStatus').textContent = '✓ ' + (r.picked && r.picked.stationName ? r.picked.stationName + ' · ' : '') + F.orientationLabel(r.vertical);
+      $('evPortalStatus').className = 'pickstatus good'; applyPhase();
+    } finally { $('btnEvPortalCheck').disabled = false; }
   }
 
   async function save() {
@@ -92,13 +97,24 @@ if (typeof document !== 'undefined') {
     if (!ph.canSave) { $('formError').textContent = ph.reasons.join('  '); return; }
     $('formError').textContent = '';
     const payload = buildAddPayload({ ...form, leadMin: effectiveLeadMin(), autoStop: $('evAutoStop').checked, repeatWeekly: $('evRepeat').checked, title: $('evTitle').value.trim() });
-    if (form.editingId) {
-      const r = await api.invoke('schedule:update', { id: form.editingId, patch: payload });
-      if (!r || !r.ok) { $('formError').textContent = (r && r.error) || 'That broadcast could not be changed.'; return; }
-    } else {
-      await api.invoke('schedule:add', payload);
+    // Disable during the save so a second click can't create a duplicate, and —
+    // critically — check the result so a FAILED save doesn't close the form as if
+    // it worked (a class would silently never air). Mirrors the edit branch.
+    $('btnSave').disabled = true;
+    try {
+      if (form.editingId) {
+        const r = await api.invoke('schedule:update', { id: form.editingId, patch: payload });
+        if (!r || !r.ok) { $('formError').textContent = (r && r.error) || 'That broadcast could not be changed. Please try again.'; return; }
+      } else {
+        const r = await api.invoke('schedule:add', payload);
+        if (!r || !r.id) { $('formError').textContent = (r && r.error) || 'That broadcast could not be scheduled. Please try again.'; return; }
+      }
+      hideForm();
+    } catch (e) {
+      $('formError').textContent = 'That broadcast could not be saved: ' + ((e && e.message) || e);
+    } finally {
+      $('btnSave').disabled = false;
     }
-    hideForm();
   }
 
   let lastEvents = [];
@@ -140,11 +156,18 @@ if (typeof document !== 'undefined') {
     if (next) {
       const title = escapeHtml(next.title || next.fileName || '(video)');
       const warn = next.needsVideo ? '<div class="fc-warn">This weekly slot still needs this week\'s video.</div>' : '';
-      const ends = F.endsAround(next);
       hero.className = 'card has-next';
       const nextEye = 'Next up' + (next.stationName ? ' · ' + next.stationName : '');
-      const slate = next.leadMs > 0 ? 'slate from ' + F.fmtClock(next.fireAt - next.leadMs) : '';
-      hero.innerHTML = '<span class="fc-eye">● ' + escapeHtml(nextEye) + '</span><div class="fc-title">' + title + '</div><div class="fc-count">' + F.fmtCountdown(next.fireAt - now) + '</div><div class="fc-meta">' + escapeHtml(F.fmtDateTime(next.fireAt) + (slate ? ' · ' + slate : '') + (ends ? ' · ' + ends : '')) + '</div>' + warn;
+      // Two tiers so the hero isn't five equal facts: date+time is the primary line;
+      // slate/ends sit quieter below. (The row still carries the full auto-stop note.)
+      const endMs = next.durationSec > 0 ? next.fireAt + next.durationSec * 1000 : 0;
+      const sub2 = [];
+      if (next.leadMs > 0) sub2.push('slate from ' + F.fmtClock(next.fireAt - next.leadMs));
+      if (endMs) sub2.push('ends around ' + F.fmtClock(endMs));
+      hero.innerHTML = '<span class="fc-eye">● ' + escapeHtml(nextEye) + '</span><div class="fc-title">' + title + '</div><div class="fc-count">' + F.fmtCountdown(next.fireAt - now) + '</div>'
+        + '<div class="fc-meta">' + escapeHtml(F.fmtDateTime(next.fireAt)) + '</div>'
+        + (sub2.length ? '<div class="fc-meta-2">' + escapeHtml(sub2.join(' · ')) + '</div>' : '')
+        + warn;
       return;
     }
     hero.className = 'card';
@@ -173,7 +196,7 @@ if (typeof document !== 'undefined') {
     }
     if (state.phase !== 'downloaded') { bar.className = 'hidden'; return; }
     const version = state.version ? 'v' + state.version : 'A new version';
-    const btn = $('btnUpdateNow'); btn.dataset.action = 'install'; btn.textContent = 'Restart & Update';
+    const btn = $('btnUpdateNow'); btn.dataset.action = 'install'; btn.textContent = 'Restart & update';
     if (state.safe) {
       bar.className = '';
       $('updateText').textContent = version + ' is ready — restart to finish updating.';
@@ -193,9 +216,11 @@ if (typeof document !== 'undefined') {
     const live = up.find((e) => ['starting', 'preshow', 'playing'].includes(e.status));
     $('liveBar').className = live ? '' : 'hidden';
     $('upcomingList').innerHTML = '';
-    for (const ev of up.sort((a, b) => a.fireAt - b.fireAt)) $('upcomingList').appendChild(row(ev, true));
+    if (up.length === 0) $('upcomingList').innerHTML = '<div class="sched-empty">Upcoming classes will appear here.</div>';
+    else for (const ev of up.sort((a, b) => a.fireAt - b.fireAt)) $('upcomingList').appendChild(row(ev, true));
     $('historyList').innerHTML = '';
-    for (const ev of past.sort((a, b) => b.doneAt - a.doneAt)) $('historyList').appendChild(row(ev, false));
+    if (past.length === 0) $('historyList').innerHTML = '<div class="empty-note">No past events yet.</div>';
+    else for (const ev of past.sort((a, b) => b.doneAt - a.doneAt)) $('historyList').appendChild(row(ev, false));
   }
 
   function row(ev, upcoming) {
@@ -203,25 +228,52 @@ if (typeof document !== 'undefined') {
     const pill = F.statusPill(ev);
     const title = ev.title || ev.fileName || '(video)';
     const ends = (ev.status === 'failed' || ev.status === 'missed') ? '' : F.endsAround(ev);   // "ends around…" is misleading on events that never played
-    const station = (upcoming && ev.stationName) ? ' <span class="meta">→ ' + escapeHtml(ev.stationName) + '</span>' : '';
-    const slate = (upcoming && ev.status === 'pending' && ev.leadMs > 0) ? ' <span class="meta">' + escapeHtml('slate from ' + F.fmtClock(ev.fireAt - ev.leadMs)) + '</span>' : '';
-    const outcomeMeta = (!upcoming && ev.outcome) ? ' <span class="meta">' + escapeHtml(ev.outcome) + '</span>' : '';
-    el.innerHTML = '<span class="pill ' + pill.kind + '">' + escapeHtml(pill.label) + '</span> <b>' + escapeHtml(title) + '</b>' + station + ' <span class="meta">' + F.fmtDateTime(ev.fireAt) + '</span>' + slate + (ends ? ' <span class="meta">' + escapeHtml(ends) + '</span>' : '') + outcomeMeta;
+    const station = (upcoming && ev.stationName) ? ' → ' + ev.stationName : '';
+    const slate = (upcoming && ev.status === 'pending' && ev.leadMs > 0) ? ' · slate from ' + F.fmtClock(ev.fireAt - ev.leadMs) : '';
+    const sub = [F.fmtDateTime(ev.fireAt) + slate, ends, (!upcoming && ev.outcome) ? ev.outcome : '']
+      .filter(Boolean).join(' · ');
+    // Stable two-part row: a min-width:0 content column (so long names wrap instead
+    // of overflowing) + a fixed action group that never gets shoved off-screen.
+    const main = document.createElement('div'); main.className = 'smain';
+    main.innerHTML = '<div class="stitle"><span class="pill ' + pill.kind + '">' + escapeHtml(pill.label) + '</span> <b>' + escapeHtml(title + station) + '</b></div>'
+      + '<div class="ssub">' + escapeHtml(sub) + '</div>';
+    el.appendChild(main);
     if (upcoming) {
-      if (['starting', 'preshow', 'playing'].includes(ev.status)) { const s = btn('Stop', () => api.invoke('schedule:stop', ev.id)); el.appendChild(s); }
-      else {
-        el.appendChild(btn('Edit', () => openEdit(ev)));
-        el.appendChild(btn('Remove', async () => { const res = await api.invoke('schedule:remove', ev.id); if (!res.ok) alert(res.error); }));
+      const acts = document.createElement('div'); acts.className = 'sacts';
+      if (['starting', 'preshow', 'playing'].includes(ev.status)) {
+        acts.appendChild(btn('End stream now', () => api.invoke('schedule:stop', ev.id), 'btn-danger'));
+      } else {
+        acts.appendChild(btn('Edit', () => openEdit(ev)));
+        acts.appendChild(btn('Remove', () => confirmRemove(ev, acts), 'btn-danger'));
       }
+      el.appendChild(acts);
     }
     return el;
   }
 
-  function btn(label, fn) { const b = document.createElement('button'); b.className = 'btn-quiet btn-small'; b.textContent = label; b.onclick = fn; return b; }
+  // Two-step delete: the first Remove click swaps the row's actions for an explicit
+  // "Remove?" confirm, so a scheduled class can't be erased on a single stray click.
+  function confirmRemove(ev, acts) {
+    acts.innerHTML = '';
+    const prompt = document.createElement('span'); prompt.className = 'ev-confirm';
+    prompt.appendChild(document.createTextNode('Remove?'));
+    prompt.appendChild(btn('Remove', async () => {
+      const res = await api.invoke('schedule:remove', ev.id);
+      if (!res || !res.ok) alert((res && res.error) || 'That broadcast could not be removed.');
+      // on success the schedule:changed push re-renders the list
+    }, 'btn-danger'));
+    prompt.appendChild(btn('Cancel', () => renderList(lastEvents), 'btn-quiet'));
+    acts.appendChild(prompt);
+  }
+
+  function btn(label, fn, variant) { const b = document.createElement('button'); b.className = (variant || 'btn-quiet') + ' btn-small'; b.textContent = label; b.onclick = fn; return b; }
   function escapeHtml(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
-  function showForm() { $('formCard').className = 'card'; resetForm(); }
-  function hideForm() { $('formCard').className = 'card hidden'; }
+  // Hide the big "+ Schedule a video" trigger while its form is open, so there
+  // aren't two identical primary buttons stacked and a stray re-click can't wipe
+  // the half-filled form.
+  function showForm() { $('newRow').className = 'hidden'; $('formCard').className = 'card'; resetForm(); }
+  function hideForm() { $('formCard').className = 'card hidden'; $('newRow').className = ''; }
   function resetForm() {
     Object.assign(form, { filePath: '', fileName: '', durationSec: 0, vertical: false, fireAt: 0, contentItemGuid: '', scheduleGuid: '', stationName: '', linkChecked: false, editingId: null, startNow: false });
     for (const id of ['evDate', 'evPortalLink', 'evTitle']) $(id).value = '';
@@ -241,6 +293,7 @@ if (typeof document !== 'undefined') {
   // Load an existing upcoming broadcast into the form. The class link box is
   // rebuilt from the stored class id so it reads back the way it was pasted.
   function openEdit(ev) {
+    $('newRow').className = 'hidden';
     $('formCard').className = 'card';
     resetForm();
     Object.assign(form, {
@@ -274,7 +327,7 @@ if (typeof document !== 'undefined') {
 
   async function loadSetup() {
     const s = await api.invoke('settings:get');
-    $('setSlateImage').value = s.slateImage || ''; $('setSlateMusic').value = s.slateMusic || '';
+    $('setSlateImage').value = s.slateImage || ''; $('setSlateImageVertical').value = s.slateImageVertical || ''; $('setSlateMusic').value = s.slateMusic || '';
     $('setFade').value = String(s.fadeMs || 1000);
     const presets = ['2500', '4500', '6000'];
     if (presets.includes(String(s.videoBitrate))) { $('setBitratePreset').value = String(s.videoBitrate); $('setBitrateCustom').style.display = 'none'; }
@@ -283,16 +336,21 @@ if (typeof document !== 'undefined') {
   }
   function chosenBitrate() { const p = $('setBitratePreset').value; return p === 'custom' ? (parseInt($('setBitrateCustom').value, 10) || 6000) : parseInt(p, 10); }
   async function saveSetup() {
-    await api.invoke('settings:save', { slateImage: $('setSlateImage').value, slateMusic: $('setSlateMusic').value, fadeMs: parseInt($('setFade').value, 10), videoBitrate: chosenBitrate(), portalEmail: $('setPortalEmail').value.trim(), portalApiKey: $('setPortalApiKey').value.trim() });
+    await api.invoke('settings:save', { slateImage: $('setSlateImage').value, slateImageVertical: $('setSlateImageVertical').value, slateMusic: $('setSlateMusic').value, fadeMs: parseInt($('setFade').value, 10), videoBitrate: chosenBitrate(), portalEmail: $('setPortalEmail').value.trim(), portalApiKey: $('setPortalApiKey').value.trim() });
     const pw = $('setPortalPassword').value; if (pw) { await api.invoke('secret:setPassword', pw); $('setPortalPassword').value = ''; }
-    hasSlateConfigured = !!$('setSlateImage').value;
+    hasSlateConfigured = !!($('setSlateImage').value || $('setSlateImageVertical').value);
     showView('main');
   }
   async function testLogin() {
-    $('portalTestResult').textContent = 'Testing…';
-    const r = await api.invoke('portal:testLogin', { email: $('setPortalEmail').value.trim(), password: $('setPortalPassword').value, apiKey: $('setPortalApiKey').value.trim() });
-    if (!r.ok) { $('portalTestResult').textContent = '✗ ' + (r.error || 'Login failed'); $('portalTestResult').className = 'pickstatus bad'; return; }
-    $('portalTestResult').textContent = '✓ Signed in — ' + (r.stations ? r.stations.length : 0) + ' studios found'; $('portalTestResult').className = 'pickstatus good';
+    // Reset to a NEUTRAL class so "Testing…" never inherits the prior try's green/red
+    // (which read as a stale result), and block re-presses during the request.
+    $('btnPortalTest').disabled = true;
+    $('portalTestResult').textContent = 'Testing…'; $('portalTestResult').className = 'pickstatus';
+    try {
+      const r = await api.invoke('portal:testLogin', { email: $('setPortalEmail').value.trim(), password: $('setPortalPassword').value, apiKey: $('setPortalApiKey').value.trim() });
+      if (!r.ok) { $('portalTestResult').textContent = '✗ ' + (r.error || 'Login failed'); $('portalTestResult').className = 'pickstatus bad'; return; }
+      $('portalTestResult').textContent = '✓ Signed in — ' + (r.stations ? r.stations.length : 0) + ' studios found'; $('portalTestResult').className = 'pickstatus good';
+    } finally { $('btnPortalTest').disabled = false; }
   }
 
   function showView(which) { $('viewMain').className = which === 'main' ? '' : 'hidden'; $('viewSetup').className = which === 'setup' ? '' : 'hidden'; }
@@ -326,12 +384,13 @@ if (typeof document !== 'undefined') {
     $('btnGear').onclick = () => { loadSetup(); showView('setup'); }; $('btnSetupDone').onclick = saveSetup;
     $('btnPortalTest').onclick = testLogin;
     $('btnPickSlateImage').onclick = async () => { const p = await api.invoke('dialog:openFile', { kind: 'image' }); if (p) $('setSlateImage').value = p; };
+    $('btnPickSlateImageVertical').onclick = async () => { const p = await api.invoke('dialog:openFile', { kind: 'image' }); if (p) $('setSlateImageVertical').value = p; };
     $('btnPickSlateMusic').onclick = async () => { const p = await api.invoke('dialog:openFile', { kind: 'audio' }); if (p) $('setSlateMusic').value = p; };
     $('setBitratePreset').addEventListener('change', () => { $('setBitrateCustom').style.display = $('setBitratePreset').value === 'custom' ? '' : 'none'; });
     $('btnStopNow').onclick = async () => { const evs = await api.invoke('schedule:list'); const live = evs.find((e) => ['starting', 'preshow', 'playing'].includes(e.status)); if (live) api.invoke('schedule:stop', live.id); };
     $('btnTheme').onclick = () => { const el = document.documentElement; el.setAttribute('data-theme', el.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'); };
     // clock
-    try { const s0 = await api.invoke('settings:get'); hasSlateConfigured = !!(s0 && s0.slateImage); } catch {}
+    try { const s0 = await api.invoke('settings:get'); hasSlateConfigured = !!(s0 && (s0.slateImage || s0.slateImageVertical)); } catch {}
     setInterval(() => {
       $('clockNow').textContent = F.fmtClock(Date.now()); renderHero();
       if (form.startNow && !$('formCard').className.includes('hidden')) updateWhenUI();   // keep "video starts about …" honest

@@ -9,13 +9,13 @@
 <body>
 <div class="wrap">
   <header class="topbar">
-    <div class="logo">Stream<span class="dot"> Scheduler 2</span></div>
+    <h1 class="logo">Stream<span class="dot"> Scheduler 2</span></h1>
     <div class="spacer"></div>
     <button id="btnGear" class="btn-ghost" title="Setup">Setup</button>
     <button id="btnTheme" class="btn-ghost" title="Switch dark / light mode">Theme</button>
   </header>
 
-  <div id="alertBar"></div>
+  <div id="alertBar" role="alert"></div>
 
   <div id="liveBar" class="hidden">
     <span class="livedot"></span>
@@ -29,21 +29,21 @@
        checking/downloading so it never nags about background activity. -->
   <div id="updateBar" class="hidden">
     <span class="updatedot"></span>
-    <span class="updatetext" id="updateText"></span>
+    <span class="updatetext" id="updateText" aria-live="polite"></span>
     <span class="spacer"></span>
-    <button id="btnUpdateNow">Restart &amp; Update</button>
+    <button id="btnUpdateNow">Restart &amp; update</button>
   </div>
 
   <!-- ========= MAIN VIEW ========= -->
   <div id="viewMain">
     <div class="card" id="heroCard"></div>
 
-    <div style="margin:18px 0; display:flex; justify-content:center;">
+    <div id="newRow" style="margin:18px 0; display:flex; justify-content:center;">
       <button id="btnNew" class="btn-primary btn-big">+ Schedule a video</button>
     </div>
 
     <div class="card hidden" id="formCard">
-      <h3 id="formHeading" style="margin:0 0 10px;">Schedule a video</h3>
+      <h2 id="formHeading" style="margin:0 0 10px; font-size:var(--fs-5);">Schedule a video</h2>
 
       <!-- Step 1 — the spotlight -->
       <div class="field" id="step1">
@@ -51,26 +51,26 @@
           <label class="flabel">1. Which video should play?</label>
           <div id="dropZone">
             <button class="btn-primary" id="btnPickVideo" type="button">Choose the video…</button>
-            <div id="fileCheck" class="pickstatus"></div>
+            <div id="fileCheck" class="pickstatus" aria-live="polite"></div>
           </div>
           <div class="fhint">Pick the video file from this computer or a connected drive.</div>
         </div>
         <div class="step1-collapsed">
           <span id="pickedSummary"></span>
-          <button class="btn-quiet btn-small" id="btnChangeVideo" type="button">change</button>
+          <button class="btn-quiet btn-small" id="btnChangeVideo" type="button">Change</button>
         </div>
       </div>
 
       <div id="restOfForm">
         <div class="field">
-          <label class="flabel">2. When should the video start?</label>
+          <label class="flabel" for="evWhen">2. When should the video start?</label>
           <select id="evWhen">
             <option value="later">At a set date and time</option>
             <option value="now">Start now — go live as soon as I save</option>
           </select>
           <div id="whenLater" style="margin-top:10px;">
             <div class="row2">
-              <div><input type="date" id="evDate"><div class="fhint">Date</div></div>
+              <div><input type="date" id="evDate" aria-label="Date"><div class="fhint">Date</div></div>
               <div>
                 <div class="timepick">
                   <select id="evHour" aria-label="Hour"><option value="">Hour</option></select>
@@ -82,11 +82,11 @@
               </div>
             </div>
           </div>
-          <div class="pickstatus" id="whenNowHint"></div>
+          <div class="pickstatus" id="whenNowHint" aria-live="polite"></div>
         </div>
 
         <div class="field">
-          <label class="flabel">3. Start the stream early, with the slate up?</label>
+          <label class="flabel" for="evLead">3. Start the stream early, with the slate up?</label>
           <select id="evLead">
             <option value="0">No — start right at the video time</option>
             <option value="1">1 minute early</option><option value="2">2 minutes early</option>
@@ -107,10 +107,10 @@
         </div>
 
         <div class="field">
-          <label class="flabel">Content portal class link</label>
+          <label class="flabel" for="evPortalLink">Content portal class link</label>
           <input type="text" id="evPortalLink" placeholder="paste this class's link from the content portal (…/classes/…)">
           <div style="margin-top:8px;"><button class="btn-quiet btn-small" id="btnEvPortalCheck" type="button">Check this class link</button></div>
-          <div class="pickstatus" id="evPortalStatus"></div>
+          <div class="pickstatus" id="evPortalStatus" aria-live="polite"></div>
           <div class="fhint">Required — it tells the Scheduler which studio to stream to, and ends the broadcast when the video finishes.</div>
         </div>
 
@@ -123,17 +123,17 @@
         </div>
 
         <div class="field">
-          <label class="flabel">Name for this event <span style="font-weight:400;color:var(--ink-soft)">(optional)</span></label>
+          <label class="flabel" for="evTitle">Name for this event <span style="font-weight:400;color:var(--ink-soft)">(optional)</span></label>
           <input type="text" id="evTitle" maxlength="60" placeholder="example: Friday Evening Ride">
         </div>
       </div>
 
-      <div class="form-error" id="formError"></div>
+      <div class="form-error" id="formError" role="alert"></div>
       <div class="form-actions">
         <button class="btn-primary btn-big" id="btnSave">✓ Schedule it</button>
         <button class="btn-quiet" id="btnCancel">Cancel</button>
       </div>
-      <div class="fhint" id="saveHint" style="margin-top:8px;"></div>
+      <div class="fhint" id="saveHint" style="margin-top:8px;" aria-live="polite"></div>
     </div>
 
     <h2 class="section">Schedule</h2>
@@ -144,17 +144,20 @@
   <!-- ========= SETUP VIEW ========= -->
   <div id="viewSetup" class="hidden">
     <div class="card">
-      <h3 style="margin:0; font-size:var(--fs-5);">Setup for this computer</h3>
+      <h2 style="margin:0; font-size:var(--fs-5);">Setup for this computer</h2>
       <p class="setup-sub" id="engineStatus">Checking the video engine…</p>
 
       <div class="setup-step"><div class="setup-num">1</div><div class="setup-body">
         <h3>The slate <span style="font-weight:400;color:var(--ink-soft)">(optional)</span></h3>
-        <p>What viewers see <b>before the video starts</b>: a picture, usually with waiting music.</p>
-        <div class="slate-row"><input type="text" id="setSlateImage" placeholder="no picture chosen yet" readonly>
-          <button class="btn-quiet" id="btnPickSlateImage" type="button">Choose…</button></div>
-        <div class="fhint" style="margin-bottom:10px;">The picture (PNG or JPG)</div>
-        <div class="slate-row"><input type="text" id="setSlateMusic" placeholder="no music chosen yet" readonly>
-          <button class="btn-quiet" id="btnPickSlateMusic" type="button">Choose…</button></div>
+        <p>What viewers see <b>before the video starts</b>: a picture, usually with waiting music. Set one for each shape — the Scheduler picks the right one for each class automatically.</p>
+        <div class="slate-row"><input type="text" id="setSlateImage" placeholder="no picture chosen yet" readonly aria-label="Widescreen slate image">
+          <button class="btn-quiet" id="btnPickSlateImage" type="button" aria-label="Choose widescreen slate image">Choose…</button></div>
+        <div class="fhint" style="margin-bottom:10px;">Widescreen slate — 16:9 (PNG or JPG), for normal landscape classes</div>
+        <div class="slate-row"><input type="text" id="setSlateImageVertical" placeholder="no picture chosen yet" readonly aria-label="Vertical slate image">
+          <button class="btn-quiet" id="btnPickSlateImageVertical" type="button" aria-label="Choose vertical slate image">Choose…</button></div>
+        <div class="fhint" style="margin-bottom:10px;">Vertical slate — 9:16 (PNG or JPG), for phone-shape classes</div>
+        <div class="slate-row"><input type="text" id="setSlateMusic" placeholder="no music chosen yet" readonly aria-label="Slate music">
+          <button class="btn-quiet" id="btnPickSlateMusic" type="button" aria-label="Choose slate music">Choose…</button></div>
         <div class="fhint" style="margin-bottom:10px;">The music (MP3) — loops. Leave empty for a silent slate.</div>
         <select id="setFade">
           <option value="500">Fade into the video: Quick (½ second)</option>
@@ -179,16 +182,16 @@
       <div class="setup-step"><div class="setup-num">3</div><div class="setup-body">
         <h3>Content portal login</h3>
         <p>The Scheduler signs in to find each class's studio and to end the broadcast when the video finishes. Required.</p>
-        <div class="field" style="margin-top:0;"><label class="flabel">Portal email</label>
+        <div class="field" style="margin-top:0;"><label class="flabel" for="setPortalEmail">Portal email</label>
           <input type="email" id="setPortalEmail" placeholder="you@echelonfit.com"></div>
-        <div class="field"><label class="flabel">Portal password</label>
+        <div class="field"><label class="flabel" for="setPortalPassword">Portal password</label>
           <input type="password" id="setPortalPassword" placeholder="your content portal password">
           <div class="fhint">Stored only on this computer, in your operating system's secure keychain.</div></div>
-        <div class="field"><label class="flabel">Portal API key <span style="font-weight:400;color:var(--ink-soft)">(optional)</span></label>
+        <div class="field"><label class="flabel" for="setPortalApiKey">Portal API key <span style="font-weight:400;color:var(--ink-soft)">(optional)</span></label>
           <input type="text" id="setPortalApiKey" placeholder="leave blank to start"></div>
         <div style="margin-top:16px;">
           <button class="btn-quiet btn-small" id="btnPortalTest" type="button">Test login</button>
-          <div id="portalTestResult" class="pickstatus" style="margin-top:10px;"></div>
+          <div id="portalTestResult" class="pickstatus" style="margin-top:10px;" aria-live="polite"></div>
         </div>
       </div></div>
 

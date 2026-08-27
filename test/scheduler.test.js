@@ -18,7 +18,7 @@ function fakeEngine(offset = 5) {
   e.videoOffsetSec = () => offset;
   return e;
 }
-function harness({ events = [], target = { ok: true, server: 'rtmps://h/app', key: 'KEY', stationName: 'S', vertical: false }, offset = 5, onEndBroadcast = null, slate = 'slate.png' } = {}) {
+function harness({ events = [], target = { ok: true, server: 'rtmps://h/app', key: 'KEY', stationName: 'S', vertical: false }, offset = 5, onEndBroadcast = null, slate = 'slate.png', slateVertical = '' } = {}) {
   const spawned = [];
   const ended = [];
   const order = [];   // records 'end' (portal) and 'stop' (engine) call ordering
@@ -31,7 +31,7 @@ function harness({ events = [], target = { ok: true, server: 'rtmps://h/app', ke
     streamTarget: async () => (typeof target === 'function' ? target() : target),
     endBroadcast: async (a) => { ended.push(a); order.push('end'); if (onEndBroadcast) onEndBroadcast(); return { ok: true }; },
   };
-  const settings = { get: () => ({ slateImage: slate, slateMusic: slate ? 'm.mp3' : '', fadeMs: 1000, videoBitrate: 6000 }) };
+  const settings = { get: () => ({ slateImage: slate, slateImageVertical: slateVertical, slateMusic: (slate || slateVertical) ? 'm.mp3' : '', fadeMs: 1000, videoBitrate: 6000 }) };
   let clock = 0;
   let idc = 0;
   const store = memStore(events);
@@ -46,6 +46,30 @@ const liveEvent = (over = {}) => normalizeEvent(Object.assign({
   id: 'e1', filePath: '/v.mp4', durationSec: 600, contentItemGuid: 'ci', scheduleGuid: 'sg',
   fireAt: 100000, leadMs: 30000, autoStop: true, status: 'pending',
 }, over));
+
+test('go-live: a vertical class uses the 9:16 slate, not the 16:9 one', async () => {
+  const h = harness({
+    events: [liveEvent()],
+    target: { ok: true, server: 'rtmps://h/app', key: 'KEY', stationName: 'S', vertical: true },
+    slate: 'wide.png', slateVertical: 'tall.png',
+  });
+  h.setClock(70000);                 // == streamAt (fireAt 100000 − lead 30000)
+  await h.sched.tick();
+  assert.equal(h.spawned.length, 1);
+  assert.equal(h.spawned[0].opts.vertical, true);
+  assert.equal(h.spawned[0].opts.slateImage, 'tall.png', 'the vertical class must get the 9:16 slate');
+});
+
+test('go-live: a vertical class with only a 16:9 slate falls back to it (non-breaking)', async () => {
+  const h = harness({
+    events: [liveEvent()],
+    target: { ok: true, server: 'rtmps://h/app', key: 'KEY', stationName: 'S', vertical: true },
+    slate: 'wide.png', slateVertical: '',
+  });
+  h.setClock(70000);
+  await h.sched.tick();
+  assert.equal(h.spawned[0].opts.slateImage, 'wide.png', 'no 9:16 slate ⇒ fall back to the 16:9 one');
+});
 
 test('go-live: resolves target, spawns one engine with the right options; verified-start gates status', async () => {
   const h = harness({ events: [liveEvent()] });
