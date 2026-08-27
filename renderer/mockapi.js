@@ -18,7 +18,7 @@ function createMockApi(seed = {}) {
   // Self-update preview state — real main.js drives this from electron-updater
   // events + scheduler.isSafeToUpdate(); the mock lets the UI be exercised
   // through every phase without a real download.
-  let updateState = Object.assign({ phase: 'idle', version: '', error: '', safe: true, reason: '', afterInstall: false, downloadedFile: '' }, seed.updateState || {});
+  let updateState = Object.assign({ phase: 'idle', version: '', error: '', safe: true, reason: '', afterInstall: false, downloadedFile: '', releaseNotes: '' }, seed.updateState || {});
   const updateListeners = new Set();
   const emitUpdate = () => { for (const f of updateListeners) { try { f({ ...updateState }); } catch {} } };
 
@@ -44,7 +44,7 @@ function createMockApi(seed = {}) {
       case 'update:getState': return { ...updateState };
       case 'update:install': {
         if (!updateState.safe) return { ok: false, error: updateState.reason };
-        updateState = { phase: 'idle', version: '', error: '', safe: true, reason: '', afterInstall: false, downloadedFile: '' };
+        updateState = { phase: 'idle', version: '', error: '', safe: true, reason: '', afterInstall: false, downloadedFile: '', releaseNotes: '' };
         emitUpdate();
         return { ok: true };
       }

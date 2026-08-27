@@ -2,7 +2,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
 const { EventEmitter } = require('node:events');
-const { createUpdateController } = require('../store/updater');
+const { createUpdateController, formatReleaseNotes } = require('../store/updater');
 
 function fakeScheduler(safe = { safe: true, reason: '' }) {
   const listeners = new Set();
@@ -125,6 +125,31 @@ test('an error before any install attempt is not flagged as after-install, and n
   au.emit('error', new Error('offline'));
   assert.equal(startCalled, false);
   assert.equal(ctl.getState().afterInstall, false);
+});
+
+test('formatReleaseNotes: GitHub array of {version, note} HTML → safe plain text', () => {
+  const rn = [{ version: '2.4.1', note: '<h3>What’s new</h3><ul><li>Fixed a bug</li><li>Added notes</li></ul>' }];
+  const out = formatReleaseNotes(rn);
+  assert.match(out, /What’s new/);
+  assert.match(out, /• Fixed a bug/);
+  assert.match(out, /• Added notes/);
+  assert.equal(/<[^>]+>/.test(out), false, 'no HTML tags survive');
+});
+
+test('formatReleaseNotes: plain string is stripped; empty/null → empty string', () => {
+  assert.equal(formatReleaseNotes('<p>Hello &amp; welcome</p>'), 'Hello & welcome');
+  assert.equal(formatReleaseNotes(null), '');
+  assert.equal(formatReleaseNotes(undefined), '');
+  assert.equal(formatReleaseNotes([]), '');
+});
+
+test('update-downloaded carries formatted releaseNotes into the state', () => {
+  const au = new EventEmitter(); au.quitAndInstall = () => {}; au.checkForUpdates = async () => {};
+  const ctl = createUpdateController({ autoUpdater: au, scheduler: fakeScheduler() });
+  au.emit('update-downloaded', { version: '2.4.1', releaseNotes: [{ version: '2.4.1', note: '<ul><li>New slate</li></ul>' }] });
+  const s = ctl.getState();
+  assert.equal(s.phase, 'downloaded');
+  assert.match(s.releaseNotes, /• New slate/);
 });
 
 test('update-downloaded captures the cached file path, and it survives into a later failed-install error', () => {

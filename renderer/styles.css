@@ -214,6 +214,15 @@
   #updateBar button:disabled { opacity: 0.55; cursor: default; }
   #updateBar.blocked button { color: #fff; background: rgba(0,0,0,0.24); }
   #updateBar.blocked button:hover:not(:disabled) { background: rgba(0,0,0,0.36); }
+  /* "What's new" — a quiet text toggle beside the button; the notes drop full-width below. */
+  #updateBar #btnUpdateNotes { background: transparent; box-shadow: none; text-decoration: underline; padding: 8px 10px; }
+  #updateBar #btnUpdateNotes:hover:not(:disabled) { background: rgba(0,0,0,0.12); }
+  #updateNotes {
+    flex: 1 1 100%; margin: 4px 0 0; max-height: 190px; overflow-y: auto;
+    background: rgba(0,0,0,0.14); color: var(--on-accent); border-radius: 10px; padding: 12px 14px;
+    font-family: inherit; font-size: var(--fs-1); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere;
+  }
+  #updateBar.blocked #updateNotes { color: #fff; }
   @media (max-width: 420px) {
     #updateBar .spacer { display: none; }
     #updateBar button { width: 100%; }

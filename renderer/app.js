@@ -174,11 +174,24 @@ if (typeof document !== 'undefined') {
     hero.innerHTML = '<div class="fc-idle">Nothing scheduled yet — press <b>+ Schedule a video</b> to put a class on the calendar.</div>';
   }
 
+  let lastUpdate = null;       // remembered so the "What's new" toggle can re-read it
+  let notesExpanded = false;   // survives 1s re-renders so an open panel doesn't snap shut
+  function hideNotes() { $('btnUpdateNotes').className = 'hidden'; $('updateNotes').className = 'hidden'; notesExpanded = false; }
+  function applyNotes(state) {
+    if (!state || state.phase !== 'downloaded' || !state.releaseNotes) { hideNotes(); return; }
+    $('btnUpdateNotes').className = '';
+    $('btnUpdateNotes').textContent = notesExpanded ? 'Hide notes' : "What's new";
+    $('btnUpdateNotes').setAttribute('aria-expanded', String(notesExpanded));
+    $('updateNotes').textContent = state.releaseNotes;
+    $('updateNotes').className = notesExpanded ? '' : 'hidden';
+  }
+
   // Silent through checking/downloading/error — only surfaced once there's an
   // actual decision for the operator to make (install now, or see why not).
   function renderUpdate(state) {
     const bar = $('updateBar');
-    if (!state) { bar.className = 'hidden'; return; }
+    lastUpdate = state;
+    if (!state) { bar.className = 'hidden'; hideNotes(); return; }
     // A failed install (e.g. this computer's copy can't verify itself) still
     // leaves the scheduler running — say so, don't just go quiet. The file is
     // already downloaded, though, so offer to reveal it instead of a dead end.
@@ -192,9 +205,10 @@ if (typeof document !== 'undefined') {
         $('updateText').textContent = 'The update could not be installed (' + (state.error || 'unknown error') + '). The schedule is still running — try again later, or update this computer by hand.';
         btn.disabled = true; btn.textContent = 'Show the downloaded file'; btn.title = '';
       }
+      hideNotes();
       return;
     }
-    if (state.phase !== 'downloaded') { bar.className = 'hidden'; return; }
+    if (state.phase !== 'downloaded') { bar.className = 'hidden'; hideNotes(); return; }
     const version = state.version ? 'v' + state.version : 'A new version';
     const btn = $('btnUpdateNow'); btn.dataset.action = 'install'; btn.textContent = 'Restart & update';
     if (state.safe) {
@@ -206,6 +220,7 @@ if (typeof document !== 'undefined') {
       $('updateText').textContent = version + ' is ready, but not yet — ' + state.reason + '.';
       btn.disabled = true; btn.title = state.reason;
     }
+    applyNotes(state);
   }
 
   function renderList(events) {
@@ -374,6 +389,7 @@ if (typeof document !== 'undefined') {
       const r = await api.invoke('update:install');
       if (!r || !r.ok) renderUpdate(await api.invoke('update:getState'));
     };
+    $('btnUpdateNotes').onclick = () => { notesExpanded = !notesExpanded; applyNotes(lastUpdate); };
     // wire buttons
     $('btnNew').onclick = showForm; $('btnCancel').onclick = hideForm;
     $('btnPickVideo').onclick = pickVideo; $('btnChangeVideo').onclick = () => { form.filePath = ''; form.durationSec = 0; $('fileCheck').textContent = ''; applyPhase(); };
