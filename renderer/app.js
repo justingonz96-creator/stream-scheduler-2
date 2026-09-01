@@ -223,9 +223,54 @@ if (typeof document !== 'undefined') {
     applyNotes(state);
   }
 
+  // Connection health: a quiet green indicator when good, a loud specific banner
+  // when a broadcast dependency (portal sign-in / engine) is down — so a problem
+  // is caught BEFORE a class fails silently. main pushes this every few hours.
+  function renderHealth(state) {
+    if (!state) return;
+    const conn = $('connStatus');
+    const dot = '<span class="dotled"></span> ';
+    if (state.checking || state.ok === null) {
+      conn.className = 'sb-item conn'; conn.innerHTML = dot + 'Checking connections…'; conn.title = '';
+    } else if (state.ok) {
+      conn.className = 'sb-item conn ok'; conn.innerHTML = dot + 'Connections OK';
+      conn.title = 'Checked ' + F.fmtClock(state.at) + ' · ' + (state.checks || []).map((c) => c.label + ': ' + c.detail).join(' · ');
+    } else {
+      const bad = (state.checks || []).filter((c) => !c.ok);
+      conn.className = 'sb-item conn bad';
+      conn.innerHTML = dot + escapeHtml('⚠ ' + (bad[0] ? bad[0].label + ' problem' : 'Connection problem'));
+      conn.title = bad.map((c) => c.label + ': ' + c.detail).join(' · ');
+    }
+    // The prominent alert bar is health-owned: loud and specific when something is wrong.
+    if (state.ok === false) {
+      const bad = (state.checks || []).filter((c) => !c.ok);
+      $('alertBar').textContent = '⚠ ' + bad.map((c) => c.label + ' — ' + c.detail).join('   ') + '.  Upcoming classes may not air until this is fixed.';
+      $('alertBar').className = 'alert bad';
+    } else if (state.ok === true) {
+      $('alertBar').textContent = ''; $('alertBar').className = '';
+    }
+  }
+
+  // A broadcast that ended in failure (or a real miss) shouldn't just slip into the
+  // history — surface it until the operator acknowledges it.
+  const dismissedFails = new Set();
+  function renderFailures(events) {
+    const fails = F.recentFailures(events, Date.now(), dismissedFails);
+    const el = $('failAlert');
+    if (!fails.length) { el.className = ''; return; }
+    if (fails.length === 1) {
+      const f = fails[0];
+      $('failText').textContent = '⚠ A class didn’t air — “' + (f.title || f.fileName || 'video') + '”: ' + (f.outcome || 'it failed to broadcast') + '.';
+    } else {
+      $('failText').textContent = '⚠ ' + fails.length + ' classes didn’t air recently — open “Past events” to see which.';
+    }
+    el.className = 'show';
+  }
+
   function renderList(events) {
     lastEvents = events.slice();
     renderHero();
+    renderFailures(events);
     const up = events.filter((e) => ['pending', 'starting', 'preshow', 'playing'].includes(e.status));
     const past = events.filter((e) => ['done', 'failed', 'missed'].includes(e.status));
     const live = up.find((e) => ['starting', 'preshow', 'playing'].includes(e.status));
@@ -375,11 +420,17 @@ if (typeof document !== 'undefined') {
     const { hours, minutes } = F.buildTimeOptions();
     for (const h of hours) $('evHour').add(new Option(h, h));
     for (const m of minutes) $('evMin').add(new Option(m, m));
-    // engine status
+    // engine status line (Setup). The prominent alert bar is driven by the health
+    // check below, which covers the engine too — so no separate engine alert here.
     const chk = await api.invoke('engine:selfCheck');
-    if (!chk.ok) { $('alertBar').textContent = '⚠ The video engine isn\'t ready: ' + (chk.error || '') ; $('alertBar').className = 'alert bad'; }
     $('engineStatus').textContent = chk.ok ? ('Video engine ready — ' + (chk.version || 'bundled FFmpeg')) : ('Video engine problem: ' + (chk.error || ''));
     $('engineStatus').className = chk.ok ? 'setup-sub' : 'setup-sub bad';
+    // connection health: reflect the last check, stay live via the push channel, and
+    // let the operator force a check with "Check now".
+    renderHealth(await api.invoke('health:get'));
+    api.onHealthChanged((state) => renderHealth(state));
+    $('btnHealthCheck').onclick = async () => { renderHealth(await api.invoke('health:check')); };
+    $('btnFailDismiss').onclick = () => { for (const f of F.recentFailures(lastEvents, Date.now(), dismissedFails)) dismissedFails.add(f.id); renderFailures(lastEvents); };
     // self-update: reflect whatever main already knows, then stay live via the
     // push channel plus the clock tick (below) for the safety gate's own drift.
     renderUpdate(await api.invoke('update:getState'));

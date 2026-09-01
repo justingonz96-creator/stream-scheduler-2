@@ -1,5 +1,17 @@
 'use strict';
 const path = require('node:path');
+const fsp = require('node:fs').promises;
+
+// Is a file reachable and readable right now? Wrapped in a timeout so a
+// DISCONNECTED network drive (where fs calls can hang for many seconds) resolves
+// to "not reachable" quickly instead of freezing the health check / the app.
+function fileReachable(p, timeoutMs = 4000) {
+  if (!p) return Promise.resolve(false);
+  return Promise.race([
+    fsp.stat(p).then((st) => st.isFile()).catch(() => false),
+    new Promise((res) => setTimeout(() => res(false), timeoutMs)),
+  ]);
+}
 const { app, BrowserWindow, ipcMain, safeStorage, dialog, shell } = require('electron');
 const { appDataDir } = require('../store/appdata');
 const { createSettingsStore, buildPortalConfig } = require('../store/settings');
@@ -12,6 +24,7 @@ const { createScheduler } = require('../schedule/scheduler');
 const { createIpcHandlers } = require('./ipc');
 const { autoUpdater } = require('electron-updater');
 const { createUpdateController } = require('../store/updater');
+const { createHealthController } = require('../store/health');
 const ffmpeg = require('../engine/ffmpeg');
 const probe = require('../engine/probe');
 const { Broadcast } = require('../engine/broadcast');
@@ -31,6 +44,7 @@ if (process.argv.includes('--selfcheck')) {
 
   let win = null;
   let scheduler = null;   // hoisted so before-quit can reach it (it owns the live encode)
+  let health = null;      // hoisted so before-quit can stop its periodic timer
   function createWindow() {
     win = new BrowserWindow({
       width: 480, height: 940,
@@ -66,7 +80,14 @@ if (process.argv.includes('--selfcheck')) {
       log: (m) => console.log('[update] ' + m),
     });
     const updates = { getState: () => updateCtl.getState(), install: () => updateCtl.install(), showDownload: () => updateCtl.showDownload() };
-    const handlers = createIpcHandlers({ settings, secrets, portal, scheduler, probe, ffmpeg, updates });
+    health = createHealthController({
+      portal, ffmpeg, settings,
+      fileOk: (p) => fileReachable(p),
+      getVideoPaths: () => scheduler.getEvents().filter((e) => e.status === 'pending' && e.filePath).map((e) => e.filePath),
+      onChanged: (state) => { if (!win.isDestroyed()) win.webContents.send('health:changed', state); },
+      log: (m) => console.log('[health] ' + m),
+    });
+    const handlers = createIpcHandlers({ settings, secrets, portal, scheduler, probe, ffmpeg, updates, health });
     for (const [channel, fn] of Object.entries(handlers)) {
       ipcMain.handle(channel, (_e, payload) => fn(payload));
     }
@@ -85,11 +106,12 @@ if (process.argv.includes('--selfcheck')) {
     // Skip in dev/test runs: an unpacked app has no app-update.yml and
     // electron-updater's checkForUpdates() only ever errors there.
     if (app.isPackaged) updateCtl.start();
+    health.start();   // periodic connection check (portal sign-in + engine), + at startup
   }
   app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
   app.whenReady().then(createWindow);
   // Kill the scheduler timer + any live encode on the way out, so no ffmpeg
   // child is left running in the background after the window closes.
-  app.on('before-quit', () => { try { if (scheduler) scheduler.shutdown(); } catch {} });
+  app.on('before-quit', () => { try { if (scheduler) scheduler.shutdown(); } catch {} try { if (health) health.stop(); } catch {} });
   app.on('window-all-closed', () => app.quit());
 }

@@ -36,6 +36,7 @@ function handlers(over = {}) {
     probe: { probeFile: async (p) => ({ ok: true, durationSec: 10, width: 1920, height: 1080, _p: p }) },
     ffmpeg: { selfCheck: async () => ({ ok: true, version: 'x' }) },
     updates: { getState: () => ({ phase: 'idle', version: '', error: '', safe: true, reason: '' }), install: async () => ({ ok: true }), showDownload: async () => ({ ok: true }) },
+    health: { getState: () => ({ ok: true, at: 0, checking: false, checks: [] }), check: async () => ({ ok: true, at: 1, checking: false, checks: [] }) },
   };
   return { h: createIpcHandlers({ ...base, ...over }), calls };
 }
@@ -47,6 +48,7 @@ test('handler map covers exactly the expected channels', () => {
     'schedule:add', 'schedule:list', 'schedule:remove', 'schedule:stop', 'schedule:update',
     'secret:hasPassword', 'secret:setPassword', 'settings:get', 'settings:save',
     'update:getState', 'update:install', 'update:showDownload',
+    'health:get', 'health:check',
   ].sort());
 });
 
@@ -98,6 +100,18 @@ test('update:getState/install delegate to the injected updates object (main.js o
   const r = await h['update:install']();
   assert.equal(install.called, true);
   assert.equal(r.ok, false); assert.match(r.error, /start soon/i);
+});
+
+test('health:get/check delegate to the injected health object', async () => {
+  let checked = false;
+  const { h } = handlers({ health: {
+    getState: () => ({ ok: false, at: 5, checking: false, checks: [{ id: 'portal', ok: false, detail: 'sign-in failed' }] }),
+    check: async () => { checked = true; return { ok: true, at: 6, checking: false, checks: [] }; },
+  } });
+  const st = await h['health:get']();
+  assert.equal(st.ok, false); assert.equal(st.checks[0].detail, 'sign-in failed');
+  const r = await h['health:check']();
+  assert.equal(checked, true); assert.equal(r.ok, true);
 });
 
 test('update:showDownload delegates to the injected updates object', async () => {

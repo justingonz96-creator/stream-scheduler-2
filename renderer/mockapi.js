@@ -22,6 +22,18 @@ function createMockApi(seed = {}) {
   const updateListeners = new Set();
   const emitUpdate = () => { for (const f of updateListeners) { try { f({ ...updateState }); } catch {} } };
 
+  // Connection-health preview state — real main.js drives this from the periodic
+  // health controller; the mock lets the status bar + alert be exercised.
+  let healthState = Object.assign({
+    at: Date.now(), ok: true, checking: false,
+    checks: [{ id: 'engine', label: 'Video engine', ok: true, detail: 'ffmpeg 6.1 (bundled)' },
+             { id: 'portal', label: 'Content portal sign-in', ok: true, detail: '2 studios found' },
+             { id: 'slate', label: 'Slate files', ok: true, detail: '3 files OK' },
+             { id: 'videos', label: 'Scheduled videos', ok: true, detail: 'none scheduled' }],
+  }, seed.healthState || {});
+  const healthListeners = new Set();
+  const emitHealth = () => { for (const f of healthListeners) { try { f({ ...healthState }); } catch {} } };
+
   async function invoke(channel, payload) {
     switch (channel) {
       case 'settings:get': return { ...settings };
@@ -52,6 +64,8 @@ function createMockApi(seed = {}) {
         if (!updateState.downloadedFile) return { ok: false, error: 'Nothing has been downloaded yet.' };
         return { ok: true };
       }
+      case 'health:get': return { ...healthState };
+      case 'health:check': { healthState = { ...healthState, at: Date.now() }; emitHealth(); return { ...healthState }; }
       default: return { ok: false, error: 'unknown channel: ' + channel };
     }
   }
@@ -59,8 +73,10 @@ function createMockApi(seed = {}) {
     invoke,
     onScheduleChanged: (cb) => { listeners.add(cb); return () => listeners.delete(cb); },
     onUpdateChanged: (cb) => { updateListeners.add(cb); return () => updateListeners.delete(cb); },
+    onHealthChanged: (cb) => { healthListeners.add(cb); return () => healthListeners.delete(cb); },
     _emitChange: emit,
     _setUpdateState: (patch) => { updateState = { ...updateState, ...patch }; emitUpdate(); },
+    _setHealthState: (patch) => { healthState = { ...healthState, ...patch }; emitHealth(); },
   };
 }
 

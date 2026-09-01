@@ -17,6 +17,14 @@
 
   <div id="alertBar" role="alert"></div>
 
+  <!-- A class that didn't air — shown until the operator acknowledges it, so a
+       failed broadcast can't quietly slip into the history unnoticed. -->
+  <div id="failAlert" role="alert">
+    <span id="failText"></span>
+    <span class="spacer"></span>
+    <button id="btnFailDismiss" type="button">Dismiss</button>
+  </div>
+
   <div id="liveBar" class="hidden">
     <span class="livedot"></span>
     <span class="livetext">LIVE — the stream is running</span>
@@ -204,6 +212,8 @@
   </div>
 
   <div id="statusBar">
+    <span class="sb-item conn" id="connStatus" aria-live="polite"></span>
+    <button class="linky" id="btnHealthCheck" type="button">Check now</button>
     <span class="sb-item sb-clock" id="clockNow">…</span>
   </div>
 </div>

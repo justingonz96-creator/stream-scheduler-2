@@ -3,6 +3,26 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const F = require('../renderer/format');
 
+test('recentFailures: recent failed + real missed only; skips needsVideo, done, stale, dismissed', () => {
+  const now = 1_700_000_000_000;
+  const events = [
+    { id: 'a', status: 'failed', doneAt: now - 1000 },                     // in — a real failure
+    { id: 'b', status: 'missed', needsVideo: false, doneAt: now - 2000 },  // in — missed but had a video
+    { id: 'c', status: 'missed', needsVideo: true, doneAt: now - 1000 },   // out — weekly slot with no video (expected)
+    { id: 'd', status: 'done', doneAt: now - 1000 },                       // out — it aired
+    { id: 'e', status: 'failed', doneAt: now - 48 * 3600 * 1000 },         // out — too old
+    { id: 'f', status: 'failed', doneAt: now - 500 },                      // out — dismissed
+    { id: 'g', status: 'pending', doneAt: 0 },                             // out — hasn't run
+  ];
+  const ids = F.recentFailures(events, now, new Set(['f'])).map((e) => e.id);
+  assert.deepEqual(ids.sort(), ['a', 'b']);
+});
+
+test('recentFailures: empty/undefined inputs are safe', () => {
+  assert.deepEqual(F.recentFailures(undefined, 1, new Set()), []);
+  assert.deepEqual(F.recentFailures([], 1), []);
+});
+
 test('statusPill maps every scheduler status', () => {
   assert.equal(F.statusPill({ status: 'playing' }).kind, 'live');
   assert.equal(F.statusPill({ status: 'playing' }).label, 'On air');

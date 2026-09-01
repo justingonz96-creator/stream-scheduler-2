@@ -175,6 +175,20 @@
   #alertBar.warn { background: var(--warn-soft); color: var(--warn); border-color: var(--warn-border); }
   #alertBar.alert { display: block; }
 
+  /* "A class didn't air" notice — amber, dismissible (distinct from the red,
+     self-clearing connection alert above). */
+  #failAlert {
+    display: none; margin-top: var(--sp-4); border-radius: 14px; padding: var(--sp-4) var(--sp-5);
+    background: var(--warn-soft); color: var(--warn); font-weight: 600; font-size: var(--fs-2);
+    border: 1px solid var(--warn-border); align-items: center; gap: var(--sp-3); flex-wrap: wrap; overflow-wrap: anywhere;
+  }
+  #failAlert.show { display: flex; }
+  #failAlert #failText { flex: 1 1 auto; min-width: 0; }
+  #failAlert #btnFailDismiss { background: rgba(0,0,0,0.06); color: var(--warn); font-size: var(--fs-1); padding: 8px 14px; min-height: 0; flex: none; }
+  #failAlert #btnFailDismiss:hover { background: rgba(0,0,0,0.12); }
+  :root[data-theme="dark"] #failAlert #btnFailDismiss { background: rgba(255,255,255,0.10); }
+  :root[data-theme="dark"] #failAlert #btnFailDismiss:hover { background: rgba(255,255,255,0.18); }
+
   /* LIVE bar */
   #liveBar {
     display: flex; margin-top: var(--sp-4); border-radius: 14px; padding: var(--sp-4) var(--sp-5);
@@ -420,9 +434,12 @@
   #statusBar .sb-item:first-child { padding-left: 0; }
   #statusBar .sb-item:empty { display: none; padding: 0; border: 0; }
   #statusBar .sb-clock { border-right: 0; margin-left: auto; padding-right: 0; color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
-  #statusBar .dotled { width: 7px; height: 7px; border-radius: 50%; background: var(--bad); flex: none; }
+  #statusBar .dotled { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-soft); flex: none; }
   #statusBar .conn.ok .dotled { background: var(--good); }
   #statusBar .conn.ok { color: var(--good); }
+  #statusBar .conn.bad .dotled { background: var(--bad); }
+  #statusBar .conn.bad { color: var(--bad); font-weight: 700; }
+  #statusBar #btnHealthCheck { border-right: 0; padding: 0 12px; }
 
 /* ---- Spotlight step 1 (Plan 4 §3) ---- */
 #step1.spotlight { padding: var(--sp-5); border: 1px solid var(--accent-ring); border-radius: 14px; background: var(--accent-soft); box-shadow: 0 0 0 4px var(--accent-ring); }

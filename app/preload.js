@@ -1,7 +1,7 @@
 'use strict';
 const { contextBridge, ipcRenderer } = require('electron');
 
-const ALLOWED = ['settings:get', 'settings:save', 'secret:hasPassword', 'secret:setPassword', 'portal:testLogin', 'portal:checkLink', 'probe:file', 'engine:selfCheck', 'schedule:list', 'schedule:add', 'schedule:update', 'schedule:remove', 'schedule:stop', 'dialog:openFile', 'update:getState', 'update:install', 'update:showDownload'];
+const ALLOWED = ['settings:get', 'settings:save', 'secret:hasPassword', 'secret:setPassword', 'portal:testLogin', 'portal:checkLink', 'probe:file', 'engine:selfCheck', 'schedule:list', 'schedule:add', 'schedule:update', 'schedule:remove', 'schedule:stop', 'dialog:openFile', 'update:getState', 'update:install', 'update:showDownload', 'health:get', 'health:check'];
 
 contextBridge.exposeInMainWorld('api', {
   invoke: (channel, payload) => {
@@ -17,5 +17,10 @@ contextBridge.exposeInMainWorld('api', {
     const listener = (_e, state) => cb(state);
     ipcRenderer.on('update:changed', listener);
     return () => ipcRenderer.removeListener('update:changed', listener);
+  },
+  onHealthChanged: (cb) => {
+    const listener = (_e, state) => cb(state);
+    ipcRenderer.on('health:changed', listener);
+    return () => ipcRenderer.removeListener('health:changed', listener);
   },
 });

@@ -4,7 +4,7 @@
 // ipcMain.handle registration and the push channel (schedule:changed).
 const { parsePortalLink } = require('../portal/link');
 
-function createIpcHandlers({ settings, secrets, portal, scheduler, probe, ffmpeg, updates }) {
+function createIpcHandlers({ settings, secrets, portal, scheduler, probe, ffmpeg, updates, health }) {
   return {
     'settings:get': async () => settings.get(),
     'settings:save': async (patch) => settings.save(patch || {}),
@@ -37,6 +37,11 @@ function createIpcHandlers({ settings, secrets, portal, scheduler, probe, ffmpeg
     'update:getState': async () => updates.getState(),
     'update:install': async () => updates.install(),
     'update:showDownload': async () => updates.showDownload(),
+
+    // Connection health: getState is the last periodic result; check runs one now
+    // (the "Check now" button). main.js pushes results via the health:changed channel.
+    'health:get': async () => health.getState(),
+    'health:check': async () => health.check(),
   };
 }
 

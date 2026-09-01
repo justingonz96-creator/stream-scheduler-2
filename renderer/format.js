@@ -76,6 +76,18 @@ function parseDateTime(dateStr, hour, min, ap) {
   return new Date(+m[1], +m[2] - 1, +m[3], h, mm, 0, 0).getTime();
 }
 
-const FMT_API = { fmtClock, fmtDateTime, statusPill, endsAround, buildTimeOptions, orientationLabel, parseDateTime, splitDateTime, fmtCountdown };
+// Broadcasts that DID NOT AIR and deserve a heads-up: real failures, plus misses
+// of classes that HAD a video (a weekly slot still waiting for its video is
+// expected, not a failure). Scoped to the recent window and minus any the operator
+// has already dismissed, so old news doesn't nag forever.
+function recentFailures(events, nowMs, dismissed, windowMs = 24 * 60 * 60 * 1000) {
+  const seen = dismissed || new Set();
+  return (events || []).filter((e) =>
+    (e.status === 'failed' || (e.status === 'missed' && !e.needsVideo)) &&
+    (e.doneAt || 0) > nowMs - windowMs &&
+    !(seen.has && seen.has(e.id)));
+}
+
+const FMT_API = { fmtClock, fmtDateTime, statusPill, endsAround, buildTimeOptions, orientationLabel, parseDateTime, splitDateTime, fmtCountdown, recentFailures };
 if (typeof module !== 'undefined' && module.exports) module.exports = FMT_API;
 if (typeof window !== 'undefined') window.Fmt = FMT_API;
