@@ -118,6 +118,10 @@ if (typeof document !== 'undefined') {
   }
 
   let lastEvents = [];
+  // Which upcoming row (if any) is currently showing its two-step "Remove?"
+  // confirm. A schedule:changed push rebuilds the whole list, so we remember the
+  // id and re-apply the confirm after a rebuild instead of silently dropping it.
+  let pendingRemoveId = null;
 
   // The hero card: the app's one glanceable instrument. ON AIR (remaining time +
   // progress track) / SLATE UP (countdown to the video) / NEXT UP (ticking
@@ -313,6 +317,9 @@ if (typeof document !== 'undefined') {
       } else {
         acts.appendChild(btn('Edit', () => openEdit(ev)));
         acts.appendChild(btn('Remove', () => confirmRemove(ev, acts), 'btn-danger'));
+        // Survive a re-render: if this row was mid-"Remove?" before the rebuild,
+        // put it straight back into the confirm state.
+        if (ev.id === pendingRemoveId) confirmRemove(ev, acts);
       }
       el.appendChild(acts);
     } else {
@@ -328,15 +335,17 @@ if (typeof document !== 'undefined') {
   // Two-step delete: the first Remove click swaps the row's actions for an explicit
   // "Remove?" confirm, so a scheduled class can't be erased on a single stray click.
   function confirmRemove(ev, acts) {
+    pendingRemoveId = ev.id;   // remember, so a re-render restores this confirm
     acts.innerHTML = '';
     const prompt = document.createElement('span'); prompt.className = 'ev-confirm';
     prompt.appendChild(document.createTextNode('Remove?'));
     prompt.appendChild(btn('Remove', async () => {
+      pendingRemoveId = null;
       const res = await api.invoke('schedule:remove', ev.id);
       if (!res || !res.ok) alert((res && res.error) || 'That broadcast could not be removed.');
       // on success the schedule:changed push re-renders the list
     }, 'btn-danger'));
-    prompt.appendChild(btn('Cancel', () => renderList(lastEvents), 'btn-quiet'));
+    prompt.appendChild(btn('Cancel', () => { pendingRemoveId = null; renderList(lastEvents); }, 'btn-quiet'));
     acts.appendChild(prompt);
   }
 
@@ -350,7 +359,10 @@ if (typeof document !== 'undefined') {
   function hideForm() { $('formCard').className = 'card hidden'; $('newRow').className = ''; }
   function resetForm() {
     Object.assign(form, { filePath: '', fileName: '', durationSec: 0, vertical: false, fireAt: 0, contentItemGuid: '', scheduleGuid: '', stationName: '', linkChecked: false, editingId: null, startNow: false });
-    for (const id of ['evDate', 'evPortalLink', 'evTitle']) $(id).value = '';
+    // Clear the time selects too (evHour/evMin/evAP) — otherwise a new broadcast
+    // silently inherits the previous class's time, and setting just the date is
+    // enough to schedule at that leftover time by mistake.
+    for (const id of ['evDate', 'evPortalLink', 'evTitle', 'evHour', 'evMin', 'evAP']) $(id).value = '';
     $('evLead').value = '0'; $('evAutoStop').checked = true; $('evRepeat').checked = false;
     $('evWhen').value = 'later';
     $('fileCheck').textContent = ''; $('evPortalStatus').textContent = '';

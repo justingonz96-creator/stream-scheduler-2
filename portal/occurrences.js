@@ -39,7 +39,15 @@ function pickOccurrence(occurrences, nowSec) {
   const inWindow = timed.filter(o =>
     (o.start - GRACE) <= nowSec && nowSec <= ((o.end || (o.start + DEFAULT_SPAN)) + GRACE));
   if (inWindow.length > 0) {
-    return inWindow.slice().sort((a, b) => a.start - b.start)[inWindow.length - 1];  // latest start
+    // The window's forward GRACE also admits occurrences that have NOT started
+    // yet (up to 2h out). Among the in-window candidates, prefer the latest one
+    // that has ACTUALLY started (start <= now) — an occurrence still in the
+    // future must never be chosen over the one live now (which would stream to
+    // the wrong studio). Only if none have started do we fall back to the
+    // soonest upcoming one.
+    const started = inWindow.filter((o) => o.start <= nowSec);
+    const pool = started.length > 0 ? started : inWindow;
+    return pool.slice().sort((a, b) => a.start - b.start)[pool.length - 1];  // latest start in the chosen pool
   }
   if (timed.length > 0) {
     return timed.reduce((best, o) => Math.abs(o.start - nowSec) < Math.abs(best.start - nowSec) ? o : best);

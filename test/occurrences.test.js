@@ -32,6 +32,17 @@ test('pickOccurrence: in-window wins, latest start among in-window', () => {
   assert.equal(pickOccurrence([a, c, b], NOW).scheduleGuid, 'b');
 });
 
+test('pickOccurrence: a future occurrence inside the forward grace is NOT chosen over the one live now', () => {
+  // Regression: the 2h forward GRACE admits an occurrence that has not started
+  // yet; picking the "latest start" would then choose it over the live one and
+  // stream to the wrong studio. The one that has actually started must win.
+  const NOW = 10000;
+  const live = { scheduleGuid: 'live', stationGuid: 'L', start: 9000, end: 20000 };            // started, live now
+  const soon = { scheduleGuid: 'soon', stationGuid: 'S', start: NOW + 3600, end: NOW + 10000 }; // starts in 1h (in-window via grace)
+  assert.equal(pickOccurrence([live, soon], NOW).scheduleGuid, 'live', 'never the not-yet-live studio');
+  assert.equal(pickOccurrence([soon], NOW).scheduleGuid, 'soon', 'but if none have started, the upcoming one is still valid');
+});
+
 test('pickOccurrence: GRACE stretches the window 7200s both sides; missing end defaults start+14400', () => {
   const NOW = 100000;
   const early = { scheduleGuid: 'e', stationGuid: 'E', start: NOW + 7000 };     // starts in 7000s — inside grace

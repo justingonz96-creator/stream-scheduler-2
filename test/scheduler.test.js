@@ -191,6 +191,32 @@ test('late start (video still has content left) seeks ahead to match the clock, 
   assert.equal(h.sched.getEvents()[0].status, 'playing', 'goes straight to playing, never preshow');
 });
 
+test('retry after a LATE start re-seeks to the elapsed point (never restarts the video at 0:00)', async () => {
+  const h = harness({ events: [liveEvent()] });     // fireAt 100000, durationSec 600
+  h.setClock(100000 + 300000);                       // 5 minutes late
+  await h.sched.tick();
+  assert.equal(h.spawned[0].opts.resumeOffsetSec, 300, 'first attempt seeks to 5:00');
+  h.spawned[0].emit('failed', { reason: 'RTMP handshake blip' });   // fails BEFORE ever playing
+  await new Promise((r) => setImmediate(r));
+  assert.equal(h.spawned.length, 2, 'exactly one retry');
+  assert.equal(h.spawned[1].opts.resumeOffsetSec, 300, 'the retry ALSO seeks to 5:00, not back to 0');
+  assert.equal(h.spawned[1].opts.leadSec, 0, 'no slate on a late retry');
+});
+
+test('construction does NOT rewrite the store when there is nothing to recover (data-loss guard)', () => {
+  let saves = 0;
+  const store = { load: () => [liveEvent({ id: 'p1', status: 'pending' })], save: () => { saves++; } };
+  createScheduler({ store, portal: {}, engineFactory: () => {}, settings: { get: () => ({}) }, now: () => 0, genId: () => 'g' });
+  assert.equal(saves, 0, 'a blind boot-time save is exactly what turned a bad load into data loss');
+});
+
+test('construction persists exactly once when it recovers an interrupted broadcast', () => {
+  let saves = 0;
+  const store = { load: () => [liveEvent({ id: 'L', status: 'playing' })], save: () => { saves++; } };
+  createScheduler({ store, portal: {}, engineFactory: () => {}, settings: { get: () => ({}) }, now: () => 0, genId: () => 'g' });
+  assert.equal(saves, 1, 'one save after marking the interrupted event missed');
+});
+
 test('too late: the class would already be over ⇒ missed, no engine spawned, no portal call', async () => {
   const h = harness({ events: [liveEvent()] });   // durationSec 600
   h.setClock(100000 + 600000 + 1000);             // 601s late — past the video's own length
@@ -441,6 +467,22 @@ test('a drop DURING the slate (offset 0) resumes with the slate/lead, not straig
   assert.ok(h.spawned[1].opts.leadSec > 0, 'resume keeps the remaining lead (video still rolls at fireAt)');
   assert.equal(h.spawned[1].opts.slateImage, 'slate.png', 'slate shown again on the resume');
   assert.equal(h.spawned[1].opts.resumeOffsetSec, 0);
+});
+
+test('a slate-phase freeze noticed AFTER fireAt seeks to the elapsed point, not 0:00 (ends on time)', async () => {
+  // The stall watchdog can take ~20s to notice a frozen slate, so the resume can
+  // land past fireAt. It must seek to the elapsed point (like goLive), not restart
+  // the video at 0:00 and end the class late.
+  const h = harness({ events: [liveEvent()], offset: 0 });   // fireAt 100000, dur 600, lead 30000
+  h.setClock(70000); await h.sched.tick();
+  h.spawned[0].emit('playing');                              // verified during the slate
+  h.setClock(100000 + 20000);                                // watchdog trips ~20s past fireAt
+  h.spawned[0].emit('failed', { reason: 'The broadcast froze — it can be resumed.' });
+  await new Promise((r) => setImmediate(r));
+  assert.equal(h.spawned.length, 2);
+  assert.equal(h.spawned[1].opts.resumeOffsetSec, 20, 'seeks to 20s in, not back to 0');
+  assert.equal(h.spawned[1].opts.leadSec, 0, 'no slate — the video should already be airing');
+  assert.equal(h.spawned[1].opts.slateImage, '');
 });
 
 test('scheduler.isSafeToUpdate delegates to the model (live event blocks)', async () => {

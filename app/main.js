@@ -66,12 +66,31 @@ if (process.argv.includes('--selfcheck')) {
       log: (m) => console.log('[portal] ' + m),
     });
     let idc = 0;
-    scheduler = createScheduler({
+    const buildScheduler = () => createScheduler({
       store: scheduleStore, portal, settings,
       engineFactory: (opts) => new Broadcast(opts),
       genId: () => 'ev' + Date.now() + '-' + (idc++),
       log: (m) => console.log('[sched] ' + m),
     });
+    try {
+      scheduler = buildScheduler();
+    } catch (err) {
+      // The saved schedule was present but unreadable AND had no usable backup.
+      // Never overwrite it blindly: set the bad file aside for possible manual
+      // recovery, tell the operator plainly, then start with an empty schedule so
+      // the app still opens.
+      if (err && err.code === 'ECORRUPT') {
+        const aside = err.file + '.corrupt-' + Date.now();
+        try { require('node:fs').renameSync(err.file, aside); } catch { /* ignore */ }
+        try {
+          dialog.showErrorBox('Your saved schedule could not be read',
+            'Stream Scheduler could not read your saved schedule, so it started with an empty one.\n\n' +
+            'The unreadable file was kept (not deleted) here in case it can be recovered:\n' + aside + '\n\n' +
+            'Please re-add today\'s classes, and let your admin know.');
+        } catch { /* dialog unavailable → still continue */ }
+        scheduler = buildScheduler();   // the bad file is gone now → clean start
+      } else { throw err; }
+    }
     autoUpdater.autoDownload = true;
     autoUpdater.autoInstallOnAppQuit = false;
     const updateCtl = createUpdateController({

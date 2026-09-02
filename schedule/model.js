@@ -25,11 +25,22 @@ function plannedVideoEndAtMs(ev) { return ev.fireAt + (ev.durationSec || 0) * 10
 
 function joinRtmpUrl(server, key) { return String(server).replace(/\/+$/, '') + '/' + key; }
 
+// Advance a timestamp by exactly one week in the STUDIO's local calendar,
+// preserving the wall-clock hour/minute. A calendar week that spans a Daylight
+// Saving change is 167 or 169 hours — not 168 — so adding a fixed 7×86400000 ms
+// would land the class an hour off its slot twice a year. Date.setDate does the
+// arithmetic in local time and keeps the clock time, which is what the studio
+// actually schedules against.
+function addOneWeekLocal(ms) {
+  const d = new Date(ms);
+  d.setDate(d.getDate() + 7);
+  return d.getTime();
+}
+
 function renewWeekly(ev, nowMs, genId) {
   if (!ev.repeatWeekly) return null;
-  const WEEK = 7 * 86400000;
-  let next = ev.fireAt;
-  do { next += WEEK; } while (next <= nowMs + 60000);
+  let next = addOneWeekLocal(ev.fireAt);
+  while (next <= nowMs + 60000) next = addOneWeekLocal(next);
   return normalizeEvent({
     id: genId(), slotId: ev.slotId || ev.id, title: ev.title,
     autoStop: ev.autoStop, leadMs: ev.leadMs,

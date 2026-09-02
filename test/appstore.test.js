@@ -45,3 +45,24 @@ test('schedule store: load [] when absent, round-trips events', () => {
   st.save([{ id: 'a', title: 'x' }]);
   assert.deepEqual(createScheduleStore({ file }).load(), [{ id: 'a', title: 'x' }]);
 });
+
+test('schedule store: an existing but UNREADABLE schedule throws ECORRUPT (never silently empties then overwrites)', () => {
+  const file = tmp('schedule.json');
+  fs.writeFileSync(file, '{ this is not valid json');
+  assert.throws(() => createScheduleStore({ file }).load(), (e) => e && e.code === 'ECORRUPT');
+});
+
+test('schedule store: valid JSON that is not a list is treated as corrupt, not reset to []', () => {
+  const file = tmp('schedule.json');
+  fs.writeFileSync(file, '{"oops": true}');
+  assert.throws(() => createScheduleStore({ file }).load(), (e) => e && e.code === 'ECORRUPT');
+});
+
+test('schedule store: a corrupt primary self-heals from the rolling backup', () => {
+  const file = tmp('schedule.json');
+  const st = createScheduleStore({ file });
+  st.save([{ id: 'a' }]);
+  st.save([{ id: 'a' }, { id: 'b' }]);   // primary = 2 events, .bak = 1 event
+  fs.writeFileSync(file, 'corrupted now');
+  assert.deepEqual(createScheduleStore({ file }).load(), [{ id: 'a' }], 'recovered the prior good generation');
+});

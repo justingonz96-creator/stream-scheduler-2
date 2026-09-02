@@ -22,15 +22,21 @@ function createScheduler({ store, portal, engineFactory, settings, now = () => D
   function getEvents() { return events.map((e) => ({ ...e })); }
 
   // ----- crash recovery: a live ffmpeg cannot survive an app restart -----
+  let recovered = false;
   for (const ev of events) {
     if (['starting', 'preshow', 'playing'].includes(ev.status)) {
       ev.status = 'missed';
       ev.outcome = 'Interrupted — the app was closed during the broadcast';
       ev.doneAt = now();
+      recovered = true;
       renew(ev);
     }
   }
-  store.save(events);   // no emit yet (no listeners at construction)
+  // Persist ONLY if recovery actually changed the schedule. A blind boot-time
+  // save would rewrite schedule.json on every launch, which is exactly what
+  // turned a bad load into permanent data loss — so we never write unless we
+  // have something to write. (No emit yet: no listeners at construction.)
+  if (recovered) store.save(events);
 
   function renew(ev) {
     const slot = ev.slotId || ev.id;
@@ -124,7 +130,14 @@ function createScheduler({ store, portal, engineFactory, settings, now = () => D
       active = null;
       if (!retried) {
         log('start failed, retrying once: ' + safeReason);
-        spawn(ev, { leadSec: computeLeadSec(ev, now()), resumeOffsetSec: 0, target, retried: true, resumeCount });
+        // Mirror goLive: if the class is already late, the retry must seek the
+        // video to the elapsed point (no slate) so it still ends at its scheduled
+        // end time — NOT restart from 0:00, which would air minutes off-schedule.
+        // When not late (e.g. a blip during the pre-roll slate) lateSec is 0, so
+        // this is identical to the previous behaviour (slate lead, no seek).
+        const lateSec = Math.max(0, (now() - ev.fireAt) / 1000);
+        const retryLead = lateSec > 0 ? 0 : computeLeadSec(ev, now());
+        spawn(ev, { leadSec: retryLead, resumeOffsetSec: lateSec, target, retried: true, resumeCount });
       } else { fail(ev, safeReason); }
       return;
     }
@@ -142,9 +155,22 @@ function createScheduler({ store, portal, engineFactory, settings, now = () => D
       ev.doneAt = now(); renew(ev); persist();
       return;
     }
-    const resumeLead = offset === 0 ? computeLeadSec(ev, now()) : 0;
-    log('stream dropped, resuming' + (offset === 0 ? ' (still pre-roll)' : ' at ' + offset + 's'));
-    spawn(ev, { leadSec: resumeLead, resumeOffsetSec: offset, target, retried: true, resumeCount: resumeCount + 1 });
+    // Resume placement. Mid-video drop (offset>0): pick the video back up where
+    // it dropped. Froze during the pre-roll slate (offset 0): normally re-show the
+    // slate — BUT the stall watchdog can take ~20s to notice, so by now we may be
+    // past fireAt. In that case seek to the elapsed point (no slate), exactly like
+    // goLive and the retry path, so the class still ends at its scheduled time
+    // instead of restarting the video at 0:00 and ending late.
+    let resumeLead, resumeOffset;
+    if (offset > 0) {
+      resumeLead = 0; resumeOffset = offset;
+    } else {
+      const lateSec = Math.max(0, (now() - ev.fireAt) / 1000);
+      if (lateSec > 0) { resumeLead = 0; resumeOffset = lateSec; }        // past fireAt → seek to the clock
+      else { resumeLead = computeLeadSec(ev, now()); resumeOffset = 0; }  // still pre-roll → fresh slate
+    }
+    log('stream dropped, resuming' + (resumeOffset === 0 ? ' (still pre-roll)' : ' at ' + Math.round(resumeOffset) + 's'));
+    spawn(ev, { leadSec: resumeLead, resumeOffsetSec: resumeOffset, target, retried: true, resumeCount: resumeCount + 1 });
   }
 
   async function takeover(prev) {
