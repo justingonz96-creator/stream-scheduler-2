@@ -3,18 +3,18 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const F = require('../renderer/format');
 
-test('recentFailures: recent failed + real missed only; skips needsVideo, done, stale, dismissed', () => {
-  const now = 1_700_000_000_000;
+test('recentFailures: failed + real missed AFTER the boundary; skips needsVideo, done, pre-boundary, dismissed', () => {
+  const open = 1_700_000_000_000;   // when the app opened this session
   const events = [
-    { id: 'a', status: 'failed', doneAt: now - 1000 },                     // in — a real failure
-    { id: 'b', status: 'missed', needsVideo: false, doneAt: now - 2000 },  // in — missed but had a video
-    { id: 'c', status: 'missed', needsVideo: true, doneAt: now - 1000 },   // out — weekly slot with no video (expected)
-    { id: 'd', status: 'done', doneAt: now - 1000 },                       // out — it aired
-    { id: 'e', status: 'failed', doneAt: now - 48 * 3600 * 1000 },         // out — too old
-    { id: 'f', status: 'failed', doneAt: now - 500 },                      // out — dismissed
-    { id: 'g', status: 'pending', doneAt: 0 },                             // out — hasn't run
+    { id: 'a', status: 'failed', doneAt: open + 1000 },                     // in — failed during this session
+    { id: 'b', status: 'missed', needsVideo: false, doneAt: open + 2000 },  // in — missed but had a video
+    { id: 'c', status: 'missed', needsVideo: true, doneAt: open + 1000 },   // out — weekly slot with no video (expected)
+    { id: 'd', status: 'done', doneAt: open + 1000 },                       // out — it aired
+    { id: 'e', status: 'failed', doneAt: open - 1000 },                     // out — before this session opened (no re-nag)
+    { id: 'f', status: 'failed', doneAt: open + 500 },                      // out — dismissed
+    { id: 'g', status: 'pending', doneAt: 0 },                              // out — hasn't run
   ];
-  const ids = F.recentFailures(events, now, new Set(['f'])).map((e) => e.id);
+  const ids = F.recentFailures(events, open, new Set(['f'])).map((e) => e.id);
   assert.deepEqual(ids.sort(), ['a', 'b']);
 });
 

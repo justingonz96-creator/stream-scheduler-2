@@ -71,6 +71,19 @@ test('go-live: a vertical class with only a 16:9 slate falls back to it (non-bre
   assert.equal(h.spawned[0].opts.slateImage, 'wide.png', 'no 9:16 slate ⇒ fall back to the 16:9 one');
 });
 
+test('clearPast removes finished events (done/failed/missed) and keeps upcoming ones', () => {
+  const h = harness({ events: [
+    liveEvent({ id: 'p1', status: 'pending', fireAt: 9999999999999 }),
+    liveEvent({ id: 'd1', status: 'done', doneAt: 1 }),
+    liveEvent({ id: 'f1', status: 'failed', doneAt: 2 }),
+    liveEvent({ id: 'm1', status: 'missed', doneAt: 3 }),
+  ] });
+  const r = h.sched.clearPast();
+  assert.equal(r.ok, true);
+  assert.equal(r.removed, 3);
+  assert.deepEqual(h.sched.getEvents().map((e) => e.id), ['p1']);
+});
+
 test('go-live: resolves target, spawns one engine with the right options; verified-start gates status', async () => {
   const h = harness({ events: [liveEvent()] });
   h.setClock(70000);                 // == streamAt (fireAt 100000 − lead 30000)

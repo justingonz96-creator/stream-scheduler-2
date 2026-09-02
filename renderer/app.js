@@ -253,9 +253,10 @@ if (typeof document !== 'undefined') {
 
   // A broadcast that ended in failure (or a real miss) shouldn't just slip into the
   // history — surface it until the operator acknowledges it.
+  const sessionStart = Date.now();   // app-open time — only alert on failures that happen after this
   const dismissedFails = new Set();
   function renderFailures(events) {
-    const fails = F.recentFailures(events, Date.now(), dismissedFails);
+    const fails = F.recentFailures(events, sessionStart, dismissedFails);
     const el = $('failAlert');
     if (!fails.length) { el.className = ''; return; }
     if (fails.length === 1) {
@@ -279,8 +280,15 @@ if (typeof document !== 'undefined') {
     if (up.length === 0) $('upcomingList').innerHTML = '<div class="sched-empty">Upcoming classes will appear here.</div>';
     else for (const ev of up.sort((a, b) => a.fireAt - b.fireAt)) $('upcomingList').appendChild(row(ev, true));
     $('historyList').innerHTML = '';
-    if (past.length === 0) $('historyList').innerHTML = '<div class="empty-note">No past events yet.</div>';
-    else for (const ev of past.sort((a, b) => b.doneAt - a.doneAt)) $('historyList').appendChild(row(ev, false));
+    if (past.length === 0) { $('historyList').innerHTML = '<div class="empty-note">No past events yet.</div>'; }
+    else {
+      const bar = document.createElement('div'); bar.className = 'hist-clearbar';
+      bar.appendChild(btn('Clear all past events', async () => {
+        if (confirm('Remove all ' + past.length + ' past events from the list? This only clears the history — upcoming classes are untouched.')) await api.invoke('schedule:clearPast');
+      }));
+      $('historyList').appendChild(bar);
+      for (const ev of past.sort((a, b) => b.doneAt - a.doneAt)) $('historyList').appendChild(row(ev, false));
+    }
   }
 
   function row(ev, upcoming) {
@@ -306,6 +314,12 @@ if (typeof document !== 'undefined') {
         acts.appendChild(btn('Edit', () => openEdit(ev)));
         acts.appendChild(btn('Remove', () => confirmRemove(ev, acts), 'btn-danger'));
       }
+      el.appendChild(acts);
+    } else {
+      // Past events: a quiet Remove to clear a single history entry (low-stakes —
+      // it already happened, so no confirm step).
+      const acts = document.createElement('div'); acts.className = 'sacts';
+      acts.appendChild(btn('Remove', async () => { const res = await api.invoke('schedule:remove', ev.id); if (!res || !res.ok) alert((res && res.error) || 'That broadcast could not be removed.'); }));
       el.appendChild(acts);
     }
     return el;
@@ -430,7 +444,7 @@ if (typeof document !== 'undefined') {
     renderHealth(await api.invoke('health:get'));
     api.onHealthChanged((state) => renderHealth(state));
     $('btnHealthCheck').onclick = async () => { renderHealth(await api.invoke('health:check')); };
-    $('btnFailDismiss').onclick = () => { for (const f of F.recentFailures(lastEvents, Date.now(), dismissedFails)) dismissedFails.add(f.id); renderFailures(lastEvents); };
+    $('btnFailDismiss').onclick = () => { for (const f of F.recentFailures(lastEvents, sessionStart, dismissedFails)) dismissedFails.add(f.id); renderFailures(lastEvents); };
     // self-update: reflect whatever main already knows, then stay live via the
     // push channel plus the clock tick (below) for the safety gate's own drift.
     renderUpdate(await api.invoke('update:getState'));

@@ -255,6 +255,18 @@ function createScheduler({ store, portal, engineFactory, settings, now = () => D
     return { ok: true };
   }
 
+  // Clear the history: drop every finished event (done / failed / missed). Upcoming
+  // and live events are untouched, and weekly renewals already live as their own
+  // pending events, so nothing future is lost.
+  function clearPast() {
+    if (busy) return { ok: false, error: 'The scheduler is busy — try again in a moment.' };
+    const before = events.length;
+    events = events.filter((e) => !['done', 'failed', 'missed'].includes(e.status));
+    const removed = before - events.length;
+    if (removed) persist();
+    return { ok: true, removed };
+  }
+
   async function stopActive(id) {
     if (!active || active.eventId !== id) return { ok: false, error: 'That broadcast is not currently live.' };
     if (busy) return { ok: false, error: 'The scheduler is busy — try again in a moment.' };
@@ -286,7 +298,7 @@ function createScheduler({ store, portal, engineFactory, settings, now = () => D
 
   function safeToUpdate() { return isSafeToUpdate(events, now()); }
 
-  return { tick, start, stop, shutdown, getEvents, addEvent, updateEvent, removeEvent, stopActive, onChanged, isSafeToUpdate: safeToUpdate };
+  return { tick, start, stop, shutdown, getEvents, addEvent, updateEvent, removeEvent, clearPast, stopActive, onChanged, isSafeToUpdate: safeToUpdate };
 }
 
 module.exports = { createScheduler };

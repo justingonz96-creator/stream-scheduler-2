@@ -78,13 +78,14 @@ function parseDateTime(dateStr, hour, min, ap) {
 
 // Broadcasts that DID NOT AIR and deserve a heads-up: real failures, plus misses
 // of classes that HAD a video (a weekly slot still waiting for its video is
-// expected, not a failure). Scoped to the recent window and minus any the operator
-// has already dismissed, so old news doesn't nag forever.
-function recentFailures(events, nowMs, dismissed, windowMs = 24 * 60 * 60 * 1000) {
+// expected, not a failure). Only those that happened AFTER `afterMs` — the app's
+// open time — so reopening the app doesn't greet the operator with old errors;
+// and minus any already dismissed this session.
+function recentFailures(events, afterMs, dismissed) {
   const seen = dismissed || new Set();
   return (events || []).filter((e) =>
     (e.status === 'failed' || (e.status === 'missed' && !e.needsVideo)) &&
-    (e.doneAt || 0) > nowMs - windowMs &&
+    (e.doneAt || 0) > (afterMs || 0) &&
     !(seen.has && seen.has(e.id)));
 }
 

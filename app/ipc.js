@@ -29,6 +29,7 @@ function createIpcHandlers({ settings, secrets, portal, scheduler, probe, ffmpeg
     'schedule:add': async (ev) => scheduler.addEvent(ev || {}),
     'schedule:update': async (p) => scheduler.updateEvent(String((p && p.id) || ''), (p && p.patch) || {}),
     'schedule:remove': async (id) => scheduler.removeEvent(String(id || '')),
+    'schedule:clearPast': async () => scheduler.clearPast(),
     'schedule:stop': async (id) => scheduler.stopActive(String(id || '')),
 
     // getState is synchronous main-process state (electron-updater's own event

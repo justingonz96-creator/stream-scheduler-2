@@ -52,6 +52,7 @@ function createMockApi(seed = {}) {
       case 'schedule:add': { const ev = Object.assign({ id: 'mock' + (n++), status: 'pending', outcome: '', doneAt: 0 }, payload); events.push(ev); emit(); return { ...ev }; }
       case 'schedule:update': { const ev = events.find((e) => e.id === (payload && payload.id)); if (!ev) return { ok: false, error: 'That broadcast was not found.' }; Object.assign(ev, (payload && payload.patch) || {}); emit(); return { ok: true, event: { ...ev } }; }
       case 'schedule:remove': { events = events.filter((e) => e.id !== payload); emit(); return { ok: true }; }
+      case 'schedule:clearPast': { const b = events.length; events = events.filter((e) => !['done', 'failed', 'missed'].includes(e.status)); emit(); return { ok: true, removed: b - events.length }; }
       case 'schedule:stop': return { ok: true };
       case 'update:getState': return { ...updateState };
       case 'update:install': {

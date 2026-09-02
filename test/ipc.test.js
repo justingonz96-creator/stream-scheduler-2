@@ -31,6 +31,7 @@ function handlers(over = {}) {
       addEvent: (e) => { calls.add.push(e); return { id: 'new', ...e }; },
       updateEvent: (id, patch) => { calls.update.push([id, patch]); return { ok: true, event: { id, ...patch } }; },
       removeEvent: (id) => { calls.remove.push(id); return { ok: true }; },
+      clearPast: () => { calls.clearPast = (calls.clearPast || 0) + 1; return { ok: true, removed: 3 }; },
       stopActive: async (id) => { calls.stop.push(id); return { ok: true }; },
     },
     probe: { probeFile: async (p) => ({ ok: true, durationSec: 10, width: 1920, height: 1080, _p: p }) },
@@ -45,7 +46,7 @@ test('handler map covers exactly the expected channels', () => {
   const { h } = handlers();
   assert.deepEqual(Object.keys(h).sort(), [
     'engine:selfCheck', 'portal:checkLink', 'portal:testLogin', 'probe:file',
-    'schedule:add', 'schedule:list', 'schedule:remove', 'schedule:stop', 'schedule:update',
+    'schedule:add', 'schedule:list', 'schedule:remove', 'schedule:clearPast', 'schedule:stop', 'schedule:update',
     'secret:hasPassword', 'secret:setPassword', 'settings:get', 'settings:save',
     'update:getState', 'update:install', 'update:showDownload',
     'health:get', 'health:check',
@@ -84,6 +85,7 @@ test('schedule + probe + selfCheck handlers delegate correctly', async () => {
   await h['schedule:update']({ id: 'e1', patch: { title: 'T2' } });
   assert.deepEqual(calls.update[0], ['e1', { title: 'T2' }]);
   await h['schedule:remove']('e1'); assert.equal(calls.remove[0], 'e1');
+  assert.deepEqual(await h['schedule:clearPast'](), { ok: true, removed: 3 }); assert.equal(calls.clearPast, 1);
   await h['schedule:stop']('e1'); assert.equal(calls.stop[0], 'e1');
   assert.equal((await h['probe:file']('/v.mp4')).durationSec, 10);
   assert.equal((await h['engine:selfCheck']()).ok, true);

@@ -380,6 +380,7 @@
   .hist-badge.h-bad { color: var(--bad); }
   .hist-main { flex: 1; min-width: 0; overflow-wrap: anywhere; }
   .hist-sub { color: var(--ink-soft); font-size: var(--fs-1); }
+  .hist-clearbar { display: flex; justify-content: flex-end; margin-bottom: 8px; }
 
   /* Setup view */
   .setup-step { display: flex; gap: var(--sp-3); margin-top: var(--sp-6); }
