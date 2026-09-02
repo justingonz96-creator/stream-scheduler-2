@@ -1,7 +1,7 @@
 {
   "name": "stream-scheduler-2",
   "productName": "Stream Scheduler 2",
-  "version": "2.4.3",
+  "version": "2.4.4",
   "private": true,
   "main": "app/main.js",
   "scripts": {
@@ -19,7 +19,7 @@
   "devDependencies": {
     "@electron/notarize": "^2.5.0",
     "electron": "^43.0.0",
-    "electron-builder": "^26.15.3"
+    "electron-builder": "26.4.0"
   },
   "build": {
     "appId": "com.echelonfit.stream-scheduler2",

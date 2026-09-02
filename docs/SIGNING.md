@@ -1,5 +1,13 @@
 # Signing & notarizing the Mac app
 
+> ⚠️ **Do NOT upgrade `electron-builder` past 26.6.x.** It is pinned to **26.4.0** on
+> purpose. Versions **26.7.0 and later** (including 26.15.x) have a regression that
+> breaks the Windows in-app auto-update — the new installer fails with *"Failed to
+> uninstall old application files … : 2"* because the uninstaller's app-running check
+> is broken during an update. See electron-builder issues #9593 / #8793 / #8131.
+> If you bump it, Windows auto-updates will silently break again.
+
+
 Signing the app with your Apple Developer account does two things:
 
 1. **No more "unidentified developer" warning** — the app opens with a normal double-click.
