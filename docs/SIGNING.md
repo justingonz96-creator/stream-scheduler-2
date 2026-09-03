@@ -2,24 +2,37 @@
 
 > ## Windows in-app update — read before touching `build/installer.nsh` or `nsis` config
 >
-> In-app updates on Windows used to fail with *"Failed to uninstall old application
-> files … : 2"* on every version and install location. **Root cause (proven in a
-> clean Windows VM with Sysinternals Handle, 2026-09-03):** electron-updater launches
-> the new installer *before* the app has finished quitting; the installer's "is the
-> app running?" check passes inside that teardown gap; the old uninstaller then tries
-> to rename the app's files (required during an update) while the exiting
-> `Stream Scheduler 2.exe` still holds `icudtl.dat` / `app.asar` / `*.pak` open, and
-> its stock retry budget (5 × 1 s) is too short. It was **not** the install location,
-> **not** the electron-builder version, and **not** antivirus.
+> In-app updates on Windows failed since 2.4.0 with *"Failed to uninstall old application
+> files … : 2"* on every version and install location. **Root cause (proven 2026-09-03 in
+> the Windows VM):** **every Windows uninstaller built on this Mac is corrupt** — it fails
+> NSIS's own integrity check and exits with code 2 before touching a file, and that exit
+> code is what the new installer reports. electron-builder cannot run the 32-bit NSIS
+> stub on modern macOS, so it reconstructs the uninstaller in JavaScript, and that
+> reconstruction is broken
+> ([electron-builder #4875](https://github.com/electron-userland/electron-builder/issues/4875));
+> no electron-builder version fixes it (26.4.0 and 26.16.0 were both tested). It was
+> **not** the install location, **not** antivirus, and **not** the app still running.
 >
-> The fix is `build/installer.nsh` (wired via `nsis.include`): the new installer waits
-> for the old app to be fully gone, then retries the uninstall patiently. Because it
-> lives in the *new* installer, it repairs updates coming from already-installed
-> versions — no manual reinstall. Keep it; keep `nsis.include` pointing at it.
+> ## ⚠️ RULE: build the Windows installer ON WINDOWS
 >
-> `electron-builder` is still pinned to 26.4.0 (harmless; the 26.7.0+ "regression"
-> reports match the symptom, not our cause). Bumping it is not known to be unsafe, but
-> re-test a Windows in-app update in the VM after any bump.
+> Never publish a Windows `.exe` built on the Mac. Build it in Justin's Windows VM
+> (UTM, VM "Windows") — or any Windows machine/CI runner:
+>
+> 1. On the Mac: `git archive --format=tar.gz -o dist/ss2-src.tar.gz HEAD` and
+>    `tar czf dist/ffmpeg-win.tar.gz -C resources ffmpeg/win-x64`, then serve `dist/`
+>    (`cd dist && python3 -m http.server 8765 --bind 0.0.0.0`). The guest reaches the
+>    Mac at its default gateway (`(Get-NetRoute -DestinationPrefix 0.0.0.0/0).NextHop`).
+> 2. In the VM (PowerShell): install Node LTS, download + `tar -xzf` both tarballs into
+>    `C:\ss2build` (ffmpeg goes under `resources\`), then `npm.cmd ci` and
+>    `npm.cmd run dist:win` (use `npm.cmd`, not `npm` — PowerShell blocks the `.ps1` shim).
+> 3. Copy `dist\stream-scheduler-2-<ver>-win-x64.exe`, its `.blockmap`, and `latest.yml`
+>    back to the Mac's `dist/` and publish them together with the Mac assets.
+>
+> `build/installer.nsh` (wired via `nsis.include`) stays: `customInit` waits for the old
+> app to be fully gone, and `customUnInstallCheck*` retries the old uninstaller briefly
+> and then **bypasses** it (drops the stale registry entry and installs over the old
+> files). That bypass is what lets machines already on the broken 2.4.4/2.4.5 update
+> without a manual reinstall. Keep both.
 
 
 Signing the app with your Apple Developer account does two things:
