@@ -93,7 +93,8 @@ class Broadcast extends EventEmitter {
     if (this._proc) throw new Error('Broadcast is one-shot: create a new Broadcast to retry or resume.');
 
     const args = buildBroadcastArgs(this.opts);
-    this._proc = spawn(ffmpeg.ffmpegPath(), args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    // env carries SSL_CERT_FILE so OpenSSL can verify an rtmps:// studio's certificate.
+    this._proc = spawn(ffmpeg.ffmpegPath(), args, { stdio: ['ignore', 'pipe', 'pipe'], env: ffmpeg.ffmpegEnv() });
 
     this._proc.on('error', (err) => {
       this._fail('The broadcast could not start — the built-in video engine failed to launch. ' +
