@@ -184,6 +184,18 @@
   }
   #failAlert.show { display: flex; }
   #failAlert #failText { flex: 1 1 auto; min-width: 0; }
+  /* "Try again" is the primary action here (re-run the class that didn't air),
+     so it reads solid against the amber, with Dismiss staying quiet beside it. */
+  #failAlert #btnFailRetry {
+    background: var(--warn); color: #fdf3e3; font-size: var(--fs-1);
+    padding: 8px 14px; min-height: 0; flex: none; font-weight: 700;
+  }
+  /* Dark theme flips --warn to a BRIGHT amber fill, so the ink must go dark —
+     same rule the accent fill follows with --on-accent. (--warn-soft is a 12%
+     transparent wash in this theme and would be invisible here.) */
+  :root[data-theme="dark"] #failAlert #btnFailRetry { color: #2a1a02; }
+  #failAlert #btnFailRetry:hover:not(:disabled) { filter: brightness(1.08); }
+  #failAlert #btnFailRetry:disabled { opacity: 0.6; cursor: default; }
   #failAlert #btnFailDismiss { background: rgba(0,0,0,0.06); color: var(--warn); font-size: var(--fs-1); padding: 8px 14px; min-height: 0; flex: none; }
   #failAlert #btnFailDismiss:hover { background: rgba(0,0,0,0.12); }
   :root[data-theme="dark"] #failAlert #btnFailDismiss { background: rgba(255,255,255,0.10); }
