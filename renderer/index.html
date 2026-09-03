@@ -159,21 +159,28 @@
 
       <div class="setup-step"><div class="setup-num">1</div><div class="setup-body">
         <h3>The slate <span style="font-weight:400;color:var(--ink-soft)">(optional)</span></h3>
-        <p>What viewers see <b>before the video starts</b>: a picture, usually with waiting music. Set one for each shape — the Scheduler picks the right one for each class automatically.</p>
-        <div class="slate-row"><input type="text" id="setSlateImage" placeholder="no picture chosen yet" readonly aria-label="Widescreen slate image">
-          <button class="btn-quiet" id="btnPickSlateImage" type="button" aria-label="Choose widescreen slate image">Choose…</button></div>
-        <div class="fhint" style="margin-bottom:10px;">Widescreen slate — 16:9 (PNG or JPG), for normal landscape classes</div>
-        <div class="slate-row"><input type="text" id="setSlateImageVertical" placeholder="no picture chosen yet" readonly aria-label="Vertical slate image">
-          <button class="btn-quiet" id="btnPickSlateImageVertical" type="button" aria-label="Choose vertical slate image">Choose…</button></div>
-        <div class="fhint" style="margin-bottom:10px;">Vertical slate — 9:16 (PNG or JPG), for phone-shape classes</div>
-        <div class="slate-row"><input type="text" id="setSlateMusic" placeholder="no music chosen yet" readonly aria-label="Slate music">
-          <button class="btn-quiet" id="btnPickSlateMusic" type="button" aria-label="Choose slate music">Choose…</button></div>
-        <div class="fhint" style="margin-bottom:10px;">The music (MP3) — loops. Leave empty for a silent slate.</div>
-        <select id="setFade">
-          <option value="500">Fade into the video: Quick (½ second)</option>
-          <option value="1000" selected>Fade into the video: Normal (1 second)</option>
-          <option value="2000">Fade into the video: Slow &amp; smooth (2 seconds)</option>
-        </select>
+        <p>What viewers see <b>before the video starts</b>: a picture, usually with waiting music. Pick one picture per class shape — the Scheduler uses the right one for each class automatically.</p>
+        <div class="field" style="margin-top:12px;"><label class="flabel" for="setSlateImage">Widescreen picture <span class="flabel-soft">16:9 · for normal landscape classes</span></label>
+          <div class="slate-row"><input type="text" id="setSlateImage" placeholder="No widescreen picture yet" readonly>
+            <button class="btn-quiet" id="btnPickSlateImage" type="button">Choose…</button>
+            <button class="btn-ghost slate-clear" id="btnClearSlateImage" type="button" aria-label="Remove widescreen picture" hidden>Remove</button></div>
+          <div class="fhint">PNG or JPG</div></div>
+        <div class="field"><label class="flabel" for="setSlateImageVertical">Vertical picture <span class="flabel-soft">9:16 · for phone-shape classes</span></label>
+          <div class="slate-row"><input type="text" id="setSlateImageVertical" placeholder="No vertical picture yet" readonly>
+            <button class="btn-quiet" id="btnPickSlateImageVertical" type="button">Choose…</button>
+            <button class="btn-ghost slate-clear" id="btnClearSlateImageVertical" type="button" aria-label="Remove vertical picture" hidden>Remove</button></div>
+          <div class="fhint">PNG or JPG</div></div>
+        <div class="field"><label class="flabel" for="setSlateMusic">Waiting music <span class="flabel-soft">optional</span></label>
+          <div class="slate-row"><input type="text" id="setSlateMusic" placeholder="No music — the slate will be silent" readonly>
+            <button class="btn-quiet" id="btnPickSlateMusic" type="button">Choose…</button>
+            <button class="btn-ghost slate-clear" id="btnClearSlateMusic" type="button" aria-label="Remove waiting music" hidden>Remove</button></div>
+          <div class="fhint">An MP3. It loops under the picture until the video starts.</div></div>
+        <div class="field"><label class="flabel" for="setFade">Fade into the video</label>
+          <select id="setFade">
+            <option value="500">Quick (½ second)</option>
+            <option value="1000" selected>Normal (1 second)</option>
+            <option value="2000">Slow &amp; smooth (2 seconds)</option>
+          </select></div>
       </div></div>
 
       <div class="setup-step"><div class="setup-num">2</div><div class="setup-body">

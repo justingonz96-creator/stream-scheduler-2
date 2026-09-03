@@ -83,3 +83,13 @@ test('splitDateTime: inverse of parseDateTime (round-trips through the pickers)'
   const s = F.splitDateTime(ms);
   assert.equal(F.parseDateTime(s.date, s.hour, s.min, s.ap), ms);
 });
+
+test('fileName: just the file name, for either slash style; empty stays empty', () => {
+  // Setup screen shows the chosen slate by name — a full path in a small box was
+  // unreadable and made the three boxes look alike (Justin, 2026-09-03).
+  assert.strictEqual(F.fileName('/Users/j/Pictures/slate-wide.png'), 'slate-wide.png');
+  assert.strictEqual(F.fileName('C:\\Slates\\vertical.jpg'), 'vertical.jpg');
+  assert.strictEqual(F.fileName('waiting.mp3'), 'waiting.mp3');
+  assert.strictEqual(F.fileName(''), '');
+  assert.strictEqual(F.fileName(null), '');
+});

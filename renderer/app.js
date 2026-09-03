@@ -411,9 +411,17 @@ if (typeof document !== 'undefined') {
     applyPhase();
   }
 
+  // Slate boxes show the chosen file by NAME (a full path in a small box was
+  // unreadable); the real path rides on the element and is what gets saved.
+  function setSlatePath(id, path) {
+    const el = $(id); const p = path || '';
+    el.dataset.path = p; el.value = p ? F.fileName(p) : ''; el.title = p;
+    const clear = $(id.replace('set', 'btnClear')); if (clear) clear.hidden = !p;
+  }
+  function slatePath(id) { return $(id).dataset.path || ''; }
   async function loadSetup() {
     const s = await api.invoke('settings:get');
-    $('setSlateImage').value = s.slateImage || ''; $('setSlateImageVertical').value = s.slateImageVertical || ''; $('setSlateMusic').value = s.slateMusic || '';
+    setSlatePath('setSlateImage', s.slateImage); setSlatePath('setSlateImageVertical', s.slateImageVertical); setSlatePath('setSlateMusic', s.slateMusic);
     $('setFade').value = String(s.fadeMs || 1000);
     const presets = ['2500', '4500', '6000'];
     if (presets.includes(String(s.videoBitrate))) { $('setBitratePreset').value = String(s.videoBitrate); $('setBitrateCustom').style.display = 'none'; }
@@ -422,9 +430,9 @@ if (typeof document !== 'undefined') {
   }
   function chosenBitrate() { const p = $('setBitratePreset').value; return p === 'custom' ? (parseInt($('setBitrateCustom').value, 10) || 6000) : parseInt(p, 10); }
   async function saveSetup() {
-    await api.invoke('settings:save', { slateImage: $('setSlateImage').value, slateImageVertical: $('setSlateImageVertical').value, slateMusic: $('setSlateMusic').value, fadeMs: parseInt($('setFade').value, 10), videoBitrate: chosenBitrate(), portalEmail: $('setPortalEmail').value.trim(), portalApiKey: $('setPortalApiKey').value.trim() });
+    await api.invoke('settings:save', { slateImage: slatePath('setSlateImage'), slateImageVertical: slatePath('setSlateImageVertical'), slateMusic: slatePath('setSlateMusic'), fadeMs: parseInt($('setFade').value, 10), videoBitrate: chosenBitrate(), portalEmail: $('setPortalEmail').value.trim(), portalApiKey: $('setPortalApiKey').value.trim() });
     const pw = $('setPortalPassword').value; if (pw) { await api.invoke('secret:setPassword', pw); $('setPortalPassword').value = ''; }
-    hasSlateConfigured = !!($('setSlateImage').value || $('setSlateImageVertical').value);
+    hasSlateConfigured = !!(slatePath('setSlateImage') || slatePath('setSlateImageVertical'));
     showView('main');
   }
   async function testLogin() {
@@ -476,9 +484,12 @@ if (typeof document !== 'undefined') {
     $('btnEvPortalCheck').onclick = checkLink; $('btnSave').onclick = save;
     $('btnGear').onclick = () => { loadSetup(); showView('setup'); }; $('btnSetupDone').onclick = saveSetup;
     $('btnPortalTest').onclick = testLogin;
-    $('btnPickSlateImage').onclick = async () => { const p = await api.invoke('dialog:openFile', { kind: 'image' }); if (p) $('setSlateImage').value = p; };
-    $('btnPickSlateImageVertical').onclick = async () => { const p = await api.invoke('dialog:openFile', { kind: 'image' }); if (p) $('setSlateImageVertical').value = p; };
-    $('btnPickSlateMusic').onclick = async () => { const p = await api.invoke('dialog:openFile', { kind: 'audio' }); if (p) $('setSlateMusic').value = p; };
+    $('btnPickSlateImage').onclick = async () => { const p = await api.invoke('dialog:openFile', { kind: 'image' }); if (p) setSlatePath('setSlateImage', p); };
+    $('btnPickSlateImageVertical').onclick = async () => { const p = await api.invoke('dialog:openFile', { kind: 'image' }); if (p) setSlatePath('setSlateImageVertical', p); };
+    $('btnPickSlateMusic').onclick = async () => { const p = await api.invoke('dialog:openFile', { kind: 'audio' }); if (p) setSlatePath('setSlateMusic', p); };
+    $('btnClearSlateImage').onclick = () => setSlatePath('setSlateImage', '');
+    $('btnClearSlateImageVertical').onclick = () => setSlatePath('setSlateImageVertical', '');
+    $('btnClearSlateMusic').onclick = () => setSlatePath('setSlateMusic', '');
     $('setBitratePreset').addEventListener('change', () => { $('setBitrateCustom').style.display = $('setBitratePreset').value === 'custom' ? '' : 'none'; });
     $('btnStopNow').onclick = async () => { const evs = await api.invoke('schedule:list'); const live = evs.find((e) => ['starting', 'preshow', 'playing'].includes(e.status)); if (live) api.invoke('schedule:stop', live.id); };
     $('btnTheme').onclick = () => { const el = document.documentElement; el.setAttribute('data-theme', el.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'); };

@@ -89,6 +89,10 @@ function recentFailures(events, afterMs, dismissed) {
     !(seen.has && seen.has(e.id)));
 }
 
-const FMT_API = { fmtClock, fmtDateTime, statusPill, endsAround, buildTimeOptions, orientationLabel, parseDateTime, splitDateTime, fmtCountdown, recentFailures };
+// Just the file name from a path (either slash style) — the Setup screen shows a
+// chosen slate by name; the full path lives in a tooltip.
+function fileName(p) { const s = p == null ? '' : String(p); return s.split(/[\\/]/).pop(); }
+
+const FMT_API = { fmtClock, fmtDateTime, statusPill, endsAround, buildTimeOptions, orientationLabel, parseDateTime, splitDateTime, fmtCountdown, recentFailures, fileName };
 if (typeof module !== 'undefined' && module.exports) module.exports = FMT_API;
 if (typeof window !== 'undefined') window.Fmt = FMT_API;

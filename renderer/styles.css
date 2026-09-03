@@ -328,9 +328,14 @@
   #pickedFile { font-weight: 700; font-size: var(--fs-4); margin-bottom: 10px; display: none; overflow-wrap: anywhere; }
   #fileCheck { margin-top: 12px; font-weight: 600; font-size: var(--fs-2); display: none; border-radius: 10px; padding: 10px 14px; text-align: left; overflow-wrap: anywhere; }
   /* A label + Browse button that wraps cleanly when there's no room. */
-  .slate-row { display: flex; gap: 10px; flex-wrap: wrap; }
-  .slate-row input { flex: 1 1 100%; min-width: 0; }
+  /* One control per line: [file name box][Choose…][Remove]. The box shrinks
+     before the buttons wrap, so a row never reads as two separate things. */
+  .slate-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .slate-row input { flex: 1 1 180px; min-width: 0; }
   .slate-row .btn-quiet { flex-shrink: 0; }
+  .slate-row .slate-clear { flex-shrink: 0; }
+  .slate-row .slate-clear[hidden] { display: none; }
+  .flabel-soft { font-weight: 400; color: var(--ink-soft); margin-left: 6px; }
   #fileCheck.checking { display: block; background: var(--chip); color: var(--ink-soft); }
   #fileCheck.good { display: block; background: var(--good-soft); color: var(--good); }
   #fileCheck.bad { display: block; background: var(--bad-soft); color: var(--bad); }
