@@ -1,7 +1,7 @@
 {
   "name": "stream-scheduler-2",
   "productName": "Stream Scheduler 2",
-  "version": "2.4.5",
+  "version": "2.4.6",
   "private": true,
   "main": "app/main.js",
   "scripts": {
@@ -96,7 +96,8 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": false,
-      "perMachine": false
+      "perMachine": false,
+      "include": "build/installer.nsh"
     }
   },
   "dependencies": {

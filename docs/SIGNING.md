@@ -1,11 +1,25 @@
 # Signing & notarizing the Mac app
 
-> ⚠️ **Do NOT upgrade `electron-builder` past 26.6.x.** It is pinned to **26.4.0** on
-> purpose. Versions **26.7.0 and later** (including 26.15.x) have a regression that
-> breaks the Windows in-app auto-update — the new installer fails with *"Failed to
-> uninstall old application files … : 2"* because the uninstaller's app-running check
-> is broken during an update. See electron-builder issues #9593 / #8793 / #8131.
-> If you bump it, Windows auto-updates will silently break again.
+> ## Windows in-app update — read before touching `build/installer.nsh` or `nsis` config
+>
+> In-app updates on Windows used to fail with *"Failed to uninstall old application
+> files … : 2"* on every version and install location. **Root cause (proven in a
+> clean Windows VM with Sysinternals Handle, 2026-09-03):** electron-updater launches
+> the new installer *before* the app has finished quitting; the installer's "is the
+> app running?" check passes inside that teardown gap; the old uninstaller then tries
+> to rename the app's files (required during an update) while the exiting
+> `Stream Scheduler 2.exe` still holds `icudtl.dat` / `app.asar` / `*.pak` open, and
+> its stock retry budget (5 × 1 s) is too short. It was **not** the install location,
+> **not** the electron-builder version, and **not** antivirus.
+>
+> The fix is `build/installer.nsh` (wired via `nsis.include`): the new installer waits
+> for the old app to be fully gone, then retries the uninstall patiently. Because it
+> lives in the *new* installer, it repairs updates coming from already-installed
+> versions — no manual reinstall. Keep it; keep `nsis.include` pointing at it.
+>
+> `electron-builder` is still pinned to 26.4.0 (harmless; the 26.7.0+ "regression"
+> reports match the symptom, not our cause). Bumping it is not known to be unsafe, but
+> re-test a Windows in-app update in the VM after any bump.
 
 
 Signing the app with your Apple Developer account does two things:
