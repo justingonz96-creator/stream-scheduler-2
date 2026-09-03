@@ -12,6 +12,54 @@ const STALL_TIMEOUT_MS = 20000; // once playing, this long with NO new video = a
    retry a failed start or resume after a crash, create a NEW Broadcast (passing
    resumeOffsetSec from the old instance's videoOffsetSec()). The rehearsal
    harnesses model this pattern. */
+/* What actually went wrong, read from ffmpeg's own stderr.
+
+   This matters more than it looks: ffmpeg says "input files" when it cannot READ
+   the video/slate, and "output files" when it cannot open the STREAM DESTINATION.
+   Both surface as "Input/output error", so a single generic message sends the
+   operator to the wrong end of the pipeline — that cost a real class and hours of
+   drive-hunting on 2026-09-03. Classify, then say the true thing. Anything we do
+   not recognise stays 'unknown' and blames nothing. */
+const OUTPUT_SIGNS = [
+  /error opening output/i, /could not write header/i, /rtmp/i,
+  /connection refused/i, /connection timed out/i, /operation timed out/i,
+  /network is unreachable/i, /no route to host/i, /broken pipe/i,
+  /cannot open connection/i, /server error/i, /handshake/i,
+  /connection to .* failed/i, /end of file/i,
+];
+const INPUT_SIGNS = [
+  /error opening input/i, /no such file or directory/i, /invalid data found/i,
+  /permission denied/i, /error during demuxing/i, /does not contain any stream/i,
+  /invalid argument/i,
+];
+
+const OUT_MSG = 'The broadcast could not start — the app could not connect to the streaming destination ' +
+  '(the studio stream server). The video file itself is fine. Check that the studio is set up to receive ' +
+  'the stream, and that this computer is allowed to reach it.';
+const IN_MSG = 'The broadcast could not start — the video (or slate) file could not be played. ' +
+  'Check the file and the network drive.';
+const UNKNOWN_MSG = 'The broadcast could not start. The details below are from the video engine.';
+
+function describeFailure(stderrTail) {
+  const raw = String(stderrTail == null ? '' : stderrTail);
+  // Keep the lines that carry meaning; ffmpeg's banner/progress noise only
+  // crowds out the one line that explains the failure.
+  const lines = raw.split('\n').map((l) => l.trim()).filter(Boolean)
+    .filter((l) => !/^(ffmpeg version|built with|configuration:|\s*lib[a-z]+\s)/i.test(l));
+  const detail = lines.slice(-6).join(' | ');
+  // An explicit output/input marker wins over the generic signs, because
+  // "Error opening output files: Input/output error" contains both.
+  const explicitOut = /error opening output/i.test(raw);
+  const explicitIn = /error opening input/i.test(raw);
+  let kind = 'unknown';
+  if (explicitOut && !explicitIn) kind = 'output';
+  else if (explicitIn && !explicitOut) kind = 'input';
+  else if (INPUT_SIGNS.some((re) => re.test(raw))) kind = 'input';
+  else if (OUTPUT_SIGNS.some((re) => re.test(raw))) kind = 'output';
+  const message = kind === 'output' ? OUT_MSG : kind === 'input' ? IN_MSG : UNKNOWN_MSG;
+  return { kind, message, detail };
+}
+
 class Broadcast extends EventEmitter {
   constructor(opts) {
     super();
@@ -66,11 +114,15 @@ class Broadcast extends EventEmitter {
         this._finalized = true;
         this.emit('ended');
       } else if (!this._playing) {
-        this._fail('The broadcast could not start — the video (or slate) file could not be played. ' +
-          'Check the file and the network drive. (' + this._stderrTail.split('\n').slice(-2).join(' ').trim() + ')');
+        const d = describeFailure(this._stderrTail);
+        this._fail(d.message + (d.detail ? ' (' + d.detail + ')' : ''));
       } else {
-        this._fail('The broadcast stopped unexpectedly (connection or file problem). ' +
-          'It can be resumed. (' + this._stderrTail.split('\n').slice(-2).join(' ').trim() + ')');
+        const d = describeFailure(this._stderrTail);
+        const why = d.kind === 'output' ? 'the connection to the studio stream server was lost'
+          : d.kind === 'input' ? 'the video file could not be read'
+          : 'connection or file problem';
+        this._fail('The broadcast stopped unexpectedly (' + why + '). It can be resumed.' +
+          (d.detail ? ' (' + d.detail + ')' : ''));
       }
     });
 
@@ -156,4 +208,4 @@ class Broadcast extends EventEmitter {
   }
 }
 
-module.exports = { Broadcast, VERIFY_AT_SEC, STALL_TIMEOUT_MS };
+module.exports = { Broadcast, describeFailure, VERIFY_AT_SEC, STALL_TIMEOUT_MS };

@@ -54,6 +54,7 @@ function createMockApi(seed = {}) {
       case 'schedule:remove': { events = events.filter((e) => e.id !== payload); emit(); return { ok: true }; }
       case 'schedule:clearPast': { const b = events.length; events = events.filter((e) => !['done', 'failed', 'missed'].includes(e.status)); emit(); return { ok: true, removed: b - events.length }; }
       case 'schedule:stop': return { ok: true };
+      case 'schedule:retry': return { ok: true };
       case 'update:getState': return { ...updateState };
       case 'update:install': {
         if (!updateState.safe) return { ok: false, error: updateState.reason };

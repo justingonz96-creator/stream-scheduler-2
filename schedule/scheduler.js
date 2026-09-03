@@ -252,6 +252,33 @@ function createScheduler({
     spawn(ev, { leadSec, resumeOffsetSec: lateSec, target, retried: false, resumeCount: 0 });
   }
 
+  /* Operator-driven retry of a class that did not air. The automatic retry
+     already happened (once, at failure time); this is the human saying "I fixed
+     the thing — run it again" so a whole class does not have to be rebuilt by
+     hand. Same placement law as goLive: if we are already into the class, seek
+     to the elapsed point so it still ends at its scheduled end time. */
+  async function retryEvent(id) {
+    const ev = byId(String(id || ''));
+    if (!ev) return { ok: false, error: 'That class is no longer in the schedule.' };
+    if (!['failed', 'missed'].includes(ev.status)) {
+      return { ok: false, error: 'Only a class that did not air can be retried.' };
+    }
+    if (busy || active) return { ok: false, error: 'Another class is already on air — end it first.' };
+    if (ev.needsVideo || !ev.filePath) return { ok: false, error: 'This class has no video file yet.' };
+    const lateSec = Math.max(0, (now() - ev.fireAt) / 1000);
+    if (ev.durationSec > 0 && lateSec >= ev.durationSec) {
+      return { ok: false, error: 'This class would already be over — it is too late to retry.' };
+    }
+    busy = true;
+    try {
+      ev.outcome = ''; ev.doneAt = 0;
+      await goLive(ev);
+    } finally { busy = false; }
+    const after = byId(ev.id);
+    if (after && after.status === 'failed') return { ok: false, error: after.outcome || 'The retry failed.' };
+    return { ok: true };
+  }
+
   async function tick() {
     const t = now();
     const sset = settings.get();
@@ -391,7 +418,7 @@ function createScheduler({
       .map((e) => (cache && cache.resolve(e.id, e.filePath)) || e.filePath);
   }
 
-  return { tick, start, stop, shutdown, getEvents, addEvent, updateEvent, removeEvent, clearPast, stopActive, onChanged, isSafeToUpdate: safeToUpdate, cachePass, mediaPathsForHealth };
+  return { tick, start, stop, shutdown, getEvents, addEvent, updateEvent, removeEvent, clearPast, stopActive, retryEvent, onChanged, isSafeToUpdate: safeToUpdate, cachePass, mediaPathsForHealth };
 }
 
 module.exports = { createScheduler };

@@ -12,7 +12,7 @@ function fileReachable(p, timeoutMs = 4000) {
     new Promise((res) => setTimeout(() => res(false), timeoutMs)),
   ]);
 }
-const { app, BrowserWindow, ipcMain, safeStorage, dialog, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, safeStorage, dialog, shell, Menu } = require('electron');
 const { appDataDir, cacheDir } = require('../store/appdata');
 const { createSettingsStore, buildPortalConfig } = require('../store/settings');
 const { createScheduleStore } = require('../store/schedule-store');
@@ -127,6 +127,21 @@ if (process.argv.includes('--selfcheck')) {
       const kind = (payload && payload.kind) || 'video';
       const res = await dialog.showOpenDialog(win, { properties: ['openFile'], filters: FILTERS[kind] || FILTERS.video });
       return (res.canceled || !res.filePaths.length) ? '' : res.filePaths[0];
+    });
+    // Right-click menu for text fields: paste a path or a stream key copied from
+    // somewhere else, and copy an error message out to send to support. Electron
+    // gives a window none of this by default.
+    win.webContents.on('context-menu', (_e, params) => {
+      const items = [];
+      if (params.isEditable) {
+        items.push({ role: 'undo' }, { role: 'redo' }, { type: 'separator' },
+          { role: 'cut', enabled: !!params.selectionText },
+          { role: 'copy', enabled: !!params.selectionText },
+          { role: 'paste' }, { type: 'separator' }, { role: 'selectAll' });
+      } else if (params.selectionText && params.selectionText.trim()) {
+        items.push({ role: 'copy' }, { type: 'separator' }, { role: 'selectAll' });
+      }
+      if (items.length) Menu.buildFromTemplate(items).popup({ window: win });
     });
     scheduler.onChanged((events) => { if (!win.isDestroyed()) win.webContents.send('schedule:changed', events); });
     scheduler.start();

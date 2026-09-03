@@ -657,3 +657,19 @@ test('while a class is live FROM ITS LOCAL COPY, other classes keep caching', as
   h.sched.cachePass();
   assert.ok(c.ensured.some(([k]) => k === 'later'));
 });
+
+// The richer ffmpeg detail added for accurate failure reporting repeats the full
+// output URL several times. Redaction must scrub EVERY occurrence, not just the first.
+test('key redaction: scrubs the key everywhere in a long multi-line ffmpeg detail', async () => {
+  const h = harness({ events: [liveEvent()] });      // target.key === 'KEY', server 'rtmps://h/app'
+  const noisy = 'Connection to rtmps://h/app/KEY failed | Cannot open connection rtmps://h/app/KEY | ' +
+    'Error opening output rtmps://h/app/KEY: Connection refused | Error opening output files: Connection refused';
+  h.setClock(70000); await h.sched.tick();
+  h.spawned[0].emit('failed', { reason: noisy });
+  await new Promise((r) => setImmediate(r));
+  h.spawned[1].emit('failed', { reason: noisy });
+  await new Promise((r) => setImmediate(r));
+  const ev = h.sched.getEvents()[0];
+  assert.ok(!ev.outcome.includes('KEY'), 'no key anywhere in the persisted outcome');
+  assert.ok(!h.logs.join('\n').includes('KEY'), 'no key anywhere in the logs');
+});

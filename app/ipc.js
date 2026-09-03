@@ -31,6 +31,8 @@ function createIpcHandlers({ settings, secrets, portal, scheduler, probe, ffmpeg
     'schedule:remove': async (id) => scheduler.removeEvent(String(id || '')),
     'schedule:clearPast': async () => scheduler.clearPast(),
     'schedule:stop': async (id) => scheduler.stopActive(String(id || '')),
+    // Operator-driven re-run of a class that did not air (the alert's "Try again").
+    'schedule:retry': async (id) => scheduler.retryEvent(String(id || '')),
 
     // getState is synchronous main-process state (electron-updater's own event
     // state + a fresh scheduler.isSafeToUpdate() check) — install re-validates

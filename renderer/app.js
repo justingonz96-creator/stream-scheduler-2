@@ -263,11 +263,20 @@ if (typeof document !== 'undefined') {
     const fails = F.recentFailures(events, sessionStart, dismissedFails);
     const el = $('failAlert');
     if (!fails.length) { el.className = ''; return; }
+    const retryBtn = $('btnFailRetry');
     if (fails.length === 1) {
       const f = fails[0];
       $('failText').textContent = '⚠ A class didn’t air — “' + (f.title || f.fileName || 'video') + '”: ' + (f.outcome || 'it failed to broadcast') + '.';
+      // Offer a re-run only while the class could still meaningfully air, so the
+      // button is never a dead end: same window the scheduler itself enforces.
+      const lateSec = Math.max(0, (Date.now() - f.fireAt) / 1000);
+      const retryable = !!f.filePath && !f.needsVideo && (!(f.durationSec > 0) || lateSec < f.durationSec);
+      retryBtn.className = retryable ? '' : 'hidden';
+      retryBtn.dataset.id = retryable ? f.id : '';
     } else {
       $('failText').textContent = '⚠ ' + fails.length + ' classes didn’t air recently — open “Past events” to see which.';
+      retryBtn.className = 'hidden';
+      retryBtn.dataset.id = '';
     }
     el.className = 'show';
   }
@@ -464,6 +473,17 @@ if (typeof document !== 'undefined') {
     renderHealth(await api.invoke('health:get'));
     api.onHealthChanged((state) => renderHealth(state));
     $('btnHealthCheck').onclick = async () => { renderHealth(await api.invoke('health:check')); };
+    $('btnFailRetry').onclick = async () => {
+      const btn = $('btnFailRetry');
+      const id = btn.dataset.id;
+      if (!id) return;
+      btn.disabled = true; btn.textContent = 'Starting…';
+      try {
+        const res = await api.invoke('schedule:retry', id);
+        if (res && res.ok) { dismissedFails.add(id); renderFailures(lastEvents); }
+        else { $('failText').textContent = '⚠ Could not retry: ' + ((res && res.error) || 'unknown problem') + '.'; }
+      } finally { btn.disabled = false; btn.textContent = 'Try again'; }
+    };
     $('btnFailDismiss').onclick = () => { for (const f of F.recentFailures(lastEvents, sessionStart, dismissedFails)) dismissedFails.add(f.id); renderFailures(lastEvents); };
     // self-update: reflect whatever main already knows, then stay live via the
     // push channel plus the clock tick (below) for the safety gate's own drift.
