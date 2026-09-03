@@ -13,9 +13,10 @@ function fileReachable(p, timeoutMs = 4000) {
   ]);
 }
 const { app, BrowserWindow, ipcMain, safeStorage, dialog, shell } = require('electron');
-const { appDataDir } = require('../store/appdata');
+const { appDataDir, cacheDir } = require('../store/appdata');
 const { createSettingsStore, buildPortalConfig } = require('../store/settings');
 const { createScheduleStore } = require('../store/schedule-store');
+const { createVideoCache } = require('../store/video-cache');
 const { createSecretStore } = require('../store/secrets');
 const { createSafeCodec } = require('../store/safe-codec');
 const { createTransport } = require('../portal/http');
@@ -65,9 +66,16 @@ if (process.argv.includes('--selfcheck')) {
       transport: createTransport(),
       log: (m) => console.log('[portal] ' + m),
     });
+    // Local copies of upcoming classes' videos + the slate files, so a live
+    // broadcast never depends on the network drive once it starts.
+    // The cache is optional by design: if its folder can't be created (odd
+    // permissions), the app must still launch and simply play from the originals.
+    let cache = null;
+    try { cache = createVideoCache({ dir: path.join(cacheDir(), 'video-cache'), log: (m) => console.log('[cache] ' + m) }); }
+    catch (e) { console.log('[cache] disabled — could not create the cache folder: ' + ((e && e.message) || e)); }
     let idc = 0;
     const buildScheduler = () => createScheduler({
-      store: scheduleStore, portal, settings,
+      store: scheduleStore, portal, settings, cache,
       engineFactory: (opts) => new Broadcast(opts),
       genId: () => 'ev' + Date.now() + '-' + (idc++),
       log: (m) => console.log('[sched] ' + m),
@@ -102,7 +110,7 @@ if (process.argv.includes('--selfcheck')) {
     health = createHealthController({
       portal, ffmpeg, settings,
       fileOk: (p) => fileReachable(p),
-      getVideoPaths: () => scheduler.getEvents().filter((e) => e.status === 'pending' && e.filePath).map((e) => e.filePath),
+      getVideoPaths: () => scheduler.mediaPathsForHealth(),   // local copy counts as healthy even if the drive is down
       onChanged: (state) => { if (!win.isDestroyed()) win.webContents.send('health:changed', state); },
       log: (m) => console.log('[health] ' + m),
     });

@@ -9,12 +9,21 @@ const {
   plannedVideoEndAtMs, joinRtmpUrl, renewWeekly, isSafeToUpdate, resolveSlateImage,
 } = require('./model');
 
-function createScheduler({ store, portal, engineFactory, settings, now = () => Date.now(), genId, log = () => {} }) {
+function createScheduler({
+  store, portal, engineFactory, settings, now = () => Date.now(), genId, log = () => {},
+  // Optional local-media cache (store/video-cache.js). When present, upcoming
+  // classes' videos (and the slate files) are copied to local disk ahead of time
+  // and the broadcast reads the local copy — so a network-drive hiccup mid-class
+  // can't stall or kill the live encode. Absent ⇒ behaviour is unchanged.
+  cache = null, cacheAheadMs = 24 * 3600000, cachePassMs = 60000,
+}) {
   let events = store.load().map(normalizeEvent);
   let active = null;      // { eventId, broadcast, target, sawPlaying, retried, resumeCount }
   let busy = false;       // one go-live / takeover / stop orchestration at a time
   let timer = null;
+  let cacheTimer = null;
   const listeners = new Set();
+  const LIVE = ['starting', 'preshow', 'playing'];
 
   const emit = () => { const snap = getEvents(); for (const fn of listeners) { try { fn(snap); } catch {} } };
   const persist = () => { store.save(events); emit(); };
@@ -37,6 +46,39 @@ function createScheduler({ store, portal, engineFactory, settings, now = () => D
   // turned a bad load into permanent data loss — so we never write unless we
   // have something to write. (No emit yet: no listeners at construction.)
   if (recovered) store.save(events);
+
+  // Local-media cache pass: start copying the videos of classes due within the
+  // look-ahead window (plus the slate files), and sweep the copies of anything
+  // no longer upcoming/live. A LIVE class keeps its copy so a mid-class resume
+  // still finds the file. Fire-and-forget: ensure() never throws or rejects.
+  function cachePass() {
+    if (!cache) return;
+    try {
+      const t = now();
+      const s = settings.get();
+      const keep = new Set();
+      for (const p of [s.slateImage, s.slateImageVertical, s.slateMusic]) {
+        if (!p) continue;
+        const k = cache.keyForPath(p);
+        keep.add(k);
+        cache.ensure(k, p);
+      }
+      const due = [];
+      for (const ev of events) {
+        if (!(ev.status === 'pending' || LIVE.includes(ev.status)) || !ev.filePath) continue;
+        keep.add(ev.id);
+        if (ev.status === 'pending' && ev.fireAt - t <= cacheAheadMs) due.push(ev);
+      }
+      // Soonest first: the cache copies ONE file at a time, so the nearest class
+      // must be served before a class that's hours away. But if a class is live
+      // FROM THE NETWORK PATH (its copy wasn't ready), don't compete with that
+      // live read by pulling other classes' files off the same drive now.
+      const liveFromNetwork = !!(active && !active.fromCache);
+      if (!liveFromNetwork) for (const ev of due.sort((a, b) => a.fireAt - b.fireAt)) cache.ensure(ev.id, ev.filePath);
+      cache.sweep(keep);
+    } catch (e) { log('cache pass error: ' + ((e && e.message) || e)); }
+  }
+  cachePass();   // at launch: sweep crash leftovers, start caching what's due
 
   function renew(ev) {
     const slot = ev.slotId || ev.id;
@@ -86,16 +128,24 @@ function createScheduler({ store, portal, engineFactory, settings, now = () => D
     const s = settings.get();
     // Match the slate to the class shape (the SAME target.vertical the canvas
     // uses), so a vertical class gets the 9:16 slate and never a letterboxed one.
-    const slateImage = resolveSlateImage(s, !!target.vertical);
+    const slateSrc = resolveSlateImage(s, !!target.vertical);
+    // Prefer a verified LOCAL copy of each media file (see cachePass): the
+    // broadcast then never reads the network drive. resolve() never touches the
+    // source, so this is safe even if the drive is down right now. No copy ⇒
+    // the original path, exactly as before.
+    const local = (key, src) => (cache && src && cache.resolve(key, src)) || src;
+    const videoPath = local(ev.id, ev.filePath);
+    const slateImage = local(cache ? cache.keyForPath(slateSrc) : '', slateSrc);
+    const slateMusic = local(cache ? cache.keyForPath(s.slateMusic) : '', s.slateMusic);
     const useSlate = leadSec > 0 && !!slateImage;
     const bc = engineFactory({
-      videoPath: ev.filePath, vertical: !!target.vertical, bitrateKbps: s.videoBitrate, fps: 30,
+      videoPath, vertical: !!target.vertical, bitrateKbps: s.videoBitrate, fps: 30,
       leadSec: useSlate ? leadSec : 0,
       fadeSec: (s.fadeMs || 0) / 1000,
-      slateImage: useSlate ? slateImage : '', slateMusic: useSlate ? s.slateMusic : '',
+      slateImage: useSlate ? slateImage : '', slateMusic: useSlate ? slateMusic : '',
       resumeOffsetSec, outUrl: joinRtmpUrl(target.server, target.key),
     });
-    active = { eventId: ev.id, broadcast: bc, target, sawPlaying: false, retried, resumeCount };
+    active = { eventId: ev.id, broadcast: bc, target, sawPlaying: false, retried, resumeCount, fromCache: videoPath !== ev.filePath };
     bc.on('playing', () => { try { onPlaying(ev.id, bc); } catch (e) { log('playing handler error: ' + ((e && e.message) || e)); } });
     bc.on('ended', () => { onEnded(ev.id, bc).catch((e) => log('ended handler error: ' + ((e && e.message) || e))); });
     bc.on('failed', (info) => { onFailed(ev.id, (info && info.reason) || 'unknown', bc).catch((e) => log('failed handler error: ' + ((e && e.message) || e))); });
@@ -246,6 +296,7 @@ function createScheduler({ store, portal, engineFactory, settings, now = () => D
     // IPC payloads can never inject lifecycle state: born pending, no slot identity.
     const norm = normalizeEvent({ ...ev, id: ev.id || genId(), status: 'pending', outcome: '', doneAt: 0, slotId: '', needsVideo: false });
     events.push(norm); persist();
+    cachePass();   // start copying the new class's video right away if it's due within the window
     return { ...norm };
   }
 
@@ -266,8 +317,10 @@ function createScheduler({ store, portal, engineFactory, settings, now = () => D
     for (const k of ['fireAt', 'leadMs', 'durationSec']) next[k] = Number(next[k]) || 0;
     const merged = normalizeEvent({ ...next, id: ev.id, slotId: ev.slotId, status: 'pending', outcome: '', doneAt: 0 });
     merged.needsVideo = !merged.filePath;   // no video ⇒ still waiting for one (never goes live)
+    if (cache && merged.filePath !== ev.filePath) cache.release(ev.id);   // a different video ⇒ old copy is useless
     Object.assign(ev, merged);
     persist();
+    cachePass();
     return { ok: true, event: { ...ev } };
   }
 
@@ -277,6 +330,7 @@ function createScheduler({ store, portal, engineFactory, settings, now = () => D
     const before = events.length;
     events = events.filter((e) => e.id !== id);
     if (events.length === before) return { ok: false, error: 'That broadcast was not found.' };
+    if (cache) cache.release(id);
     persist();
     return { ok: true };
   }
@@ -308,8 +362,14 @@ function createScheduler({ store, portal, engineFactory, settings, now = () => D
   }
 
   function onChanged(fn) { listeners.add(fn); return () => listeners.delete(fn); }
-  function start() { if (!timer) timer = setInterval(() => { tick().catch((e) => log('tick error: ' + ((e && e.message) || e))); }, 1000); }
-  function stop() { if (timer) { clearInterval(timer); timer = null; } }
+  function start() {
+    if (!timer) timer = setInterval(() => { tick().catch((e) => log('tick error: ' + ((e && e.message) || e))); }, 1000);
+    if (cache && !cacheTimer) cacheTimer = setInterval(cachePass, cachePassMs);
+  }
+  function stop() {
+    if (timer) { clearInterval(timer); timer = null; }
+    if (cacheTimer) { clearInterval(cacheTimer); cacheTimer = null; }
+  }
 
   // App shutdown: clear the timer AND kill any live encode so no ffmpeg child is
   // orphaned (a background process that keeps running after the window closes).
@@ -324,7 +384,14 @@ function createScheduler({ store, portal, engineFactory, settings, now = () => D
 
   function safeToUpdate() { return isSafeToUpdate(events, now()); }
 
-  return { tick, start, stop, shutdown, getEvents, addEvent, updateEvent, removeEvent, clearPast, stopActive, onChanged, isSafeToUpdate: safeToUpdate };
+  // What the connection health check should probe for "scheduled videos": a
+  // class already copied locally is healthy even if the network drive is down.
+  function mediaPathsForHealth() {
+    return events.filter((e) => e.status === 'pending' && e.filePath)
+      .map((e) => (cache && cache.resolve(e.id, e.filePath)) || e.filePath);
+  }
+
+  return { tick, start, stop, shutdown, getEvents, addEvent, updateEvent, removeEvent, clearPast, stopActive, onChanged, isSafeToUpdate: safeToUpdate, cachePass, mediaPathsForHealth };
 }
 
 module.exports = { createScheduler };

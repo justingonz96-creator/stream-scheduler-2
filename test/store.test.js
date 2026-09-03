@@ -4,7 +4,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
-const { appDataDir } = require('../store/appdata');
+const { appDataDir, cacheDir } = require('../store/appdata');
 const { readJson, readJsonResilient, writeJsonAtomic } = require('../store/jsonstore');
 
 test('appDataDir per platform', () => {
@@ -13,6 +13,16 @@ test('appDataDir per platform', () => {
   assert.equal(appDataDir('win32', env), path.join('C:\\Users\\kim\\AppData\\Roaming', 'StreamScheduler2'));
   assert.equal(appDataDir('linux', env), path.join('/Users/kim', '.config', 'StreamScheduler2'));
   assert.equal(appDataDir('linux', { HOME: '/h', XDG_CONFIG_HOME: '/xdg' }), path.join('/xdg', 'StreamScheduler2'));
+});
+
+test('cacheDir keeps bulk video out of the Windows roaming profile and under Caches on macOS', () => {
+  const env = { HOME: '/Users/kim', APPDATA: 'C:\\Users\\kim\\AppData\\Roaming', LOCALAPPDATA: 'C:\\Users\\kim\\AppData\\Local', XDG_CACHE_HOME: '' };
+  assert.equal(cacheDir('darwin', env), '/Users/kim/Library/Caches/StreamScheduler2');
+  assert.equal(cacheDir('win32', env), path.join('C:\\Users\\kim\\AppData\\Local', 'StreamScheduler2'), 'LOCAL, not Roaming');
+  assert.equal(cacheDir('linux', env), path.join('/Users/kim', '.cache', 'StreamScheduler2'));
+  assert.equal(cacheDir('linux', { HOME: '/h', XDG_CACHE_HOME: '/xc' }), path.join('/xc', 'StreamScheduler2'));
+  assert.equal(cacheDir('win32', { HOME: 'C:\\Users\\kim' }), path.join('C:\\Users\\kim', 'AppData', 'Local', 'StreamScheduler2'), 'sensible fallback without LOCALAPPDATA');
+  assert.notEqual(cacheDir('win32', env), appDataDir('win32', env), 'never the same folder as settings/schedule');
 });
 
 test('writeJsonAtomic + readJson round-trip, creating parent dirs', () => {

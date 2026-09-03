@@ -18,7 +18,18 @@ function fakeEngine(offset = 5) {
   e.videoOffsetSec = () => offset;
   return e;
 }
-function harness({ events = [], target = { ok: true, server: 'rtmps://h/app', key: 'KEY', stationName: 'S', vertical: false }, offset = 5, onEndBroadcast = null, slate = 'slate.png', slateVertical = '' } = {}) {
+// Fake local-media cache: records calls; `resolved` maps key → local path to
+// simulate "a verified copy exists".
+function fakeCache(resolved = {}) {
+  const c = { ensured: [], released: [], swept: [], resolved };
+  c.resolve = (key) => c.resolved[key] || null;
+  c.ensure = async (key, src) => { c.ensured.push([key, src]); return c.resolved[key] || null; };
+  c.release = (key) => { c.released.push(key); };
+  c.sweep = (keep) => { c.swept.push(new Set(keep)); };
+  c.keyForPath = (p) => 'slate-' + p;
+  return c;
+}
+function harness({ events = [], target = { ok: true, server: 'rtmps://h/app', key: 'KEY', stationName: 'S', vertical: false }, offset = 5, onEndBroadcast = null, slate = 'slate.png', slateVertical = '', cache = null } = {}) {
   const spawned = [];
   const ended = [];
   const order = [];   // records 'end' (portal) and 'stop' (engine) call ordering
@@ -37,10 +48,10 @@ function harness({ events = [], target = { ok: true, server: 'rtmps://h/app', ke
   const store = memStore(events);
   const logs = [];
   const sched = createScheduler({
-    store, portal, engineFactory, settings,
+    store, portal, engineFactory, settings, cache,
     now: () => clock, genId: () => 'gen' + (idc++), log: (m) => logs.push(m),
   });
-  return { sched, spawned, ended, order, logs, setClock: (t) => { clock = t; }, getClock: () => clock, failSave: () => store._fail() };
+  return { sched, spawned, ended, order, logs, cache, setClock: (t) => { clock = t; }, getClock: () => clock, failSave: () => store._fail() };
 }
 const liveEvent = (over = {}) => normalizeEvent(Object.assign({
   id: 'e1', filePath: '/v.mp4', durationSec: 600, contentItemGuid: 'ci', scheduleGuid: 'sg',
@@ -497,4 +508,152 @@ test('scheduler.isSafeToUpdate delegates to the model (live event blocks)', asyn
 test('scheduler.isSafeToUpdate: safe with an empty/idle schedule', () => {
   const h = harness({ events: [] });
   assert.equal(h.sched.isSafeToUpdate().safe, true);
+});
+
+// ---------- local media cache (broadcast from a local copy, not the network drive) ----------
+
+test('go-live uses the locally cached video and slate/music when available, else the original paths', async () => {
+  const cached = fakeCache({ e1: '/cache/e1.mp4', 'slate-slate.png': '/cache/slate.png', 'slate-m.mp3': '/cache/m.mp3' });
+  const h = harness({ events: [liveEvent()], cache: cached });
+  h.setClock(70000); await h.sched.tick();
+  assert.equal(h.spawned[0].opts.videoPath, '/cache/e1.mp4', 'plays the local copy');
+  assert.equal(h.spawned[0].opts.slateImage, '/cache/slate.png', 'slate from the local copy');
+  assert.equal(h.spawned[0].opts.slateMusic, '/cache/m.mp3', 'music from the local copy');
+
+  const none = harness({ events: [liveEvent()], cache: fakeCache({}) });   // nothing cached
+  none.setClock(70000); await none.sched.tick();
+  assert.equal(none.spawned[0].opts.videoPath, '/v.mp4', 'falls back to the original video path');
+  assert.equal(none.spawned[0].opts.slateImage, 'slate.png', 'falls back to the original slate');
+});
+
+test('the cache pass copies videos for classes starting within the look-ahead window, and not beyond it', () => {
+  const H = 3600000;
+  const c = fakeCache();
+  const h = harness({ cache: c, events: [
+    liveEvent({ id: 'soon', fireAt: 1 * H }),                       // within 24h
+    liveEvent({ id: 'far',  fireAt: 48 * H }),                      // beyond 24h
+    liveEvent({ id: 'slot', fireAt: 1 * H, filePath: '', needsVideo: true }),   // no video yet
+  ] });
+  h.setClock(0);
+  c.ensured.length = 0;                                             // ignore construction-time pass
+  h.sched.cachePass();
+  const keys = c.ensured.map(([k]) => k);
+  assert.ok(keys.includes('soon'), 'soon is cached');
+  assert.ok(!keys.includes('far'), 'far is not cached yet');
+  assert.ok(!keys.includes('slot'), 'a slot with no video has nothing to cache');
+});
+
+test('the cache pass also keeps the slate picture/music cached', () => {
+  const c = fakeCache();
+  const h = harness({ cache: c, events: [] });
+  h.sched.cachePass();
+  const keys = c.ensured.map(([k]) => k);
+  assert.ok(keys.includes('slate-slate.png') && keys.includes('slate-m.mp3'));
+});
+
+test('finished classes (done/failed/missed) drop out of the keep-set so their local copies are swept', () => {
+  const c = fakeCache();
+  const h = harness({ cache: c, events: [
+    liveEvent({ id: 'P', fireAt: 999999999 }),
+    liveEvent({ id: 'D', status: 'done',   doneAt: 1 }),
+    liveEvent({ id: 'F', status: 'failed', doneAt: 2 }),
+    liveEvent({ id: 'M', status: 'missed', doneAt: 3 }),
+  ] });
+  h.sched.cachePass();
+  const keep = c.swept[c.swept.length - 1];
+  assert.ok(keep.has('P'), 'upcoming class kept');
+  for (const k of ['D', 'F', 'M']) assert.ok(!keep.has(k), k + ' released');
+});
+
+test('a LIVE class keeps its local copy (a mid-class resume must still find the file)', async () => {
+  const c = fakeCache();
+  const h = harness({ cache: c, events: [liveEvent()] });
+  h.setClock(70000); await h.sched.tick();
+  h.spawned[0].emit('playing');
+  h.sched.cachePass();
+  assert.ok(c.swept[c.swept.length - 1].has('e1'));
+});
+
+test('removing an upcoming class releases its local copy immediately; scheduling one starts caching it', () => {
+  const c = fakeCache();
+  const h = harness({ cache: c, events: [] });
+  h.setClock(0);
+  const ev = h.sched.addEvent({ title: 'New', fireAt: 3600000, filePath: '/x.mp4', durationSec: 1, contentItemGuid: 'ci', scheduleGuid: 'sg' });
+  assert.ok(c.ensured.some(([k, s]) => k === ev.id && s === '/x.mp4'), 'caching starts on schedule');
+  h.sched.removeEvent(ev.id);
+  assert.ok(c.released.includes(ev.id), 'released on remove');
+});
+
+test('construction sweeps the cache, keeping only upcoming/live classes', () => {
+  const c = fakeCache();
+  harness({ cache: c, events: [liveEvent({ id: 'P', fireAt: 999999999 }), liveEvent({ id: 'D', status: 'done', doneAt: 1 })] });
+  assert.ok(c.swept.length >= 1, 'swept at construction');
+  assert.ok(c.swept[0].has('P') && !c.swept[0].has('D'));
+});
+
+test('no cache injected → behaviour is unchanged (original paths, no errors)', async () => {
+  const h = harness({ events: [liveEvent()] });   // cache: null
+  h.setClock(70000); await h.sched.tick();
+  assert.equal(h.spawned[0].opts.videoPath, '/v.mp4');
+  assert.doesNotThrow(() => h.sched.cachePass());
+});
+
+test('editing a class: changing only its time keeps the local copy; changing its video releases the old copy and caches the new one', () => {
+  const c = fakeCache();
+  const h = harness({ cache: c, events: [] });
+  h.setClock(0);
+  const ev = h.sched.addEvent({ title: 'T', fireAt: 3600000, filePath: '/a.mp4', durationSec: 1, contentItemGuid: 'ci', scheduleGuid: 'sg' });
+  c.released.length = 0; c.ensured.length = 0;
+  h.sched.updateEvent(ev.id, { fireAt: 7200000 });
+  assert.deepEqual(c.released, [], 'a time-only edit does not throw away a valid copy');
+  h.sched.updateEvent(ev.id, { filePath: '/b.mp4' });
+  assert.ok(c.released.includes(ev.id), 'old copy released');
+  assert.ok(c.ensured.some(([k, s]) => k === ev.id && s === '/b.mp4'), 'new video cached');
+});
+
+test('start() runs the cache pass on its interval; stop() halts it', (t) => {
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  const c = fakeCache();
+  const h = harness({ cache: c, events: [] });
+  h.sched.start();
+  const before = c.swept.length;
+  t.mock.timers.tick(60000);
+  assert.ok(c.swept.length > before, 'a pass ran on the interval');
+  h.sched.stop();
+  const after = c.swept.length;
+  t.mock.timers.tick(120000);
+  assert.equal(c.swept.length, after, 'no passes after stop');
+});
+
+test('mediaPathsForHealth: pending classes resolve to their local copy when cached, else the original; finished classes excluded', () => {
+  const c = fakeCache({ e1: '/cache/e1.mp4' });
+  const h = harness({ cache: c, events: [
+    liveEvent({ id: 'e1', fireAt: 999999999 }),
+    liveEvent({ id: 'e2', fireAt: 999999999, filePath: '/net/e2.mp4' }),
+    liveEvent({ id: 'd1', status: 'done', doneAt: 1 }),
+  ] });
+  assert.deepEqual(h.sched.mediaPathsForHealth().sort(), ['/cache/e1.mp4', '/net/e2.mp4']);
+});
+
+test('while a class is live FROM THE NETWORK (its copy was not ready), the cache pass does not pull other files off the drive', async () => {
+  const H = 3600000;
+  const c = fakeCache({});   // nothing cached → goes live from the network path
+  const h = harness({ cache: c, events: [liveEvent(), liveEvent({ id: 'later', fireAt: 100000 + 2 * H })] });
+  h.setClock(70000); await h.sched.tick();
+  assert.equal(h.spawned[0].opts.videoPath, '/v.mp4');
+  c.ensured.length = 0;
+  h.sched.cachePass();
+  assert.ok(!c.ensured.some(([k]) => k === 'later'), 'no competing copies during a network-fed broadcast');
+  assert.ok(c.swept.length > 0, 'sweeping still runs');
+});
+
+test('while a class is live FROM ITS LOCAL COPY, other classes keep caching', async () => {
+  const H = 3600000;
+  const c = fakeCache({ e1: '/cache/e1.mp4' });
+  const h = harness({ cache: c, events: [liveEvent(), liveEvent({ id: 'later', fireAt: 100000 + 2 * H })] });
+  h.setClock(70000); await h.sched.tick();
+  assert.equal(h.spawned[0].opts.videoPath, '/cache/e1.mp4');
+  c.ensured.length = 0;
+  h.sched.cachePass();
+  assert.ok(c.ensured.some(([k]) => k === 'later'));
 });
