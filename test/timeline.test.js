@@ -55,7 +55,11 @@ test('slate path is realtime-paced (regression: multi-input -re under-paces with
   // the slate/fade path ran ~4.7% fast, ending a 45-min class ~2 min early. The
   // `realtime` filter clamps the graph output to wall-clock. Measured: 1.047 → 1.000.
   const s = buildBroadcastArgs(BASE).join(' ');
-  assert.ok(/xfade=[^\]]*,realtime\[vout\]/.test(s), 'slate video chain must end with ,realtime[vout]');
+  // realtime must still be the pacing step immediately after the crossfade. Only
+  // the 4:2:0 format pin may follow it (see pixfmt.test.js) — nothing else, and
+  // nothing between xfade and realtime, or the pacing stops clamping the output.
+  assert.ok(/xfade=[^\]]*,realtime,format=yuv420p\[vout\]/.test(s),
+    'slate video chain must be xfade → realtime → format=yuv420p → [vout]');
 });
 
 test('the proven-good plain + resume paths are NOT touched (no realtime added)', () => {

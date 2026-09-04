@@ -38,7 +38,11 @@ function buildBroadcastArgs(o) {
       // `realtime` clamps the graph output to wall-clock. Per-input `-re` reliably
       // paces a SINGLE input, but not this multi-input (looped slate) composition —
       // without it the slate path ran ~4.7% fast, ending classes minutes early.
-      `[slv][vv]xfade=transition=fade:duration=${fade}:offset=${o.leadSec},realtime[vout]`,
+      // format=yuv420p LAST: the slate and the class share one output stream, and
+      // the pixel format is re-negotiated after the crossfade — a 4:4:4 slate JPEG
+      // (Photoshop's default) otherwise drags the WHOLE broadcast into H.264
+      // High 4:4:4 Predictive, which streaming platforms and many decoders reject.
+      `[slv][vv]xfade=transition=fade:duration=${fade}:offset=${o.leadSec},realtime,format=yuv420p[vout]`,
       `[1:a]${afmt}[sla]`,
       `[2:a]${afmt}[va]`,
       `[sla][va]acrossfade=d=${fade}[aout]`,
@@ -46,12 +50,12 @@ function buildBroadcastArgs(o) {
   } else {
     if ((o.resumeOffsetSec || 0) > 0) args.push('-ss', String(o.resumeOffsetSec));
     args.push('-re', '-i', o.videoPath);
-    filter = [`[0:v]${fit}[vout]`, `[0:a]${afmt}[aout]`].join(';');
+    filter = [`[0:v]${fit},format=yuv420p[vout]`, `[0:a]${afmt}[aout]`].join(';');
   }
 
   args.push(
     '-filter_complex', filter, '-map', '[vout]', '-map', '[aout]',
-    '-c:v', 'libx264', '-preset', 'veryfast',
+    '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p',
     '-b:v', `${kbps}k`, '-maxrate', `${kbps}k`, '-bufsize', `${kbps * 2}k`,
     '-g', String(fps * 2), '-keyint_min', String(fps * 2),
     '-c:a', 'aac', '-b:a', '160k', '-ar', '44100', '-ac', '2',
