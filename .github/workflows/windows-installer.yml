@@ -12,8 +12,12 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag to build and attach to (e.g. v2.4.8)'
+        description: 'Release tag to attach to (e.g. v2.4.8)'
         required: true
+      ref:
+        description: 'Commit/branch to build from (defaults to the tag)'
+        required: false
+        default: ''
 permissions:
   contents: write
 jobs:
@@ -24,7 +28,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag || github.event.release.tag_name }}
+          ref: ${{ inputs.ref || inputs.tag || github.event.release.tag_name }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22

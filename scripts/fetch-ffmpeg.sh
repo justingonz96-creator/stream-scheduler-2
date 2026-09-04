@@ -32,6 +32,7 @@ SHA_win_x64_ffmpeg="72a489eccd008c2ec2c0a5856c5c75bc3d8bbfa90166c4566865c246445e
 SHA_win_x64_ffprobe="19202b23c0043f15ad1b7bce2344f406fd52bd6efd8f995ce02e7392a1cec52f"
 # ------------------------------------------------------------------------------
 
+unzipq() { if command -v unzip >/dev/null 2>&1; then unzip -oq "$1" -d "$2"; else 7z x -y -o"$2" "$1" >/dev/null; fi; }   # Git Bash may lack unzip; 7z is on GitHub runners
 sha() { if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1"; else sha256sum "$1"; fi | cut -d' ' -f1; }   # Git Bash on Windows may lack shasum
 expected() { local v="SHA_$1_$2"; v="${v//-/_}"; echo "${!v}"; }
 
@@ -60,7 +61,7 @@ fetch_mac() {
       [ -f "$f" ] && echo "$platform $tool: present but NOT the pinned build — replacing"
       tmp="$(mktemp -d)"
       curl -fsSL "https://ffmpeg.martin-riedl.de/download/macos/$arch/$build/$tool.zip" -o "$tmp/$tool.zip"
-      unzip -oq "$tmp/$tool.zip" -d "$tmp"
+      unzipq "$tmp/$tool.zip" "$tmp"
       verify_or_die "$platform" "$tool" "$tmp/$tool"
       mv -f "$tmp/$tool" "$f"; chmod +x "$f"; rm -rf "$tmp"
       echo "$platform $tool: fetched + verified ($FFMPEG_VERSION build $build)"
@@ -74,7 +75,7 @@ fetch_win() {
   [ -f "$DEST/win-x64/ffmpeg.exe" ] && echo "win-x64: present but NOT the pinned build — replacing"
   tmp="$(mktemp -d)"
   curl -fsSL "https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-$FFMPEG_VERSION-essentials_build.zip" -o "$tmp/win.zip"
-  unzip -oq "$tmp/win.zip" -d "$tmp"
+  unzipq "$tmp/win.zip" "$tmp"
   verify_or_die win-x64 ffmpeg "$tmp"/ffmpeg-*/bin/ffmpeg.exe
   verify_or_die win-x64 ffprobe "$tmp"/ffmpeg-*/bin/ffprobe.exe
   mv -f "$tmp"/ffmpeg-*/bin/ffmpeg.exe "$tmp"/ffmpeg-*/bin/ffprobe.exe "$DEST/win-x64/"
