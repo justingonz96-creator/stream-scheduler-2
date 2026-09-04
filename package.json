@@ -1,7 +1,7 @@
 {
   "name": "stream-scheduler-2",
   "productName": "Stream Scheduler 2",
-  "version": "2.4.7",
+  "version": "2.4.8",
   "private": true,
   "main": "app/main.js",
   "scripts": {
