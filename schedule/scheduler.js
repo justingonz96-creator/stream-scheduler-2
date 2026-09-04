@@ -16,6 +16,7 @@ function createScheduler({
   // and the broadcast reads the local copy — so a network-drive hiccup mid-class
   // can't stall or kill the live encode. Absent ⇒ behaviour is unchanged.
   cache = null, cacheAheadMs = 24 * 3600000, cachePassMs = 60000,
+  probeFile = null,   // async (path) → { ok, durationSec, fps, error } — re-validates the file right before air
 }) {
   let events = store.load().map(normalizeEvent);
   let active = null;      // { eventId, broadcast, target, sawPlaying, retried, resumeCount }
@@ -28,7 +29,7 @@ function createScheduler({
   const emit = () => { const snap = getEvents(); for (const fn of listeners) { try { fn(snap); } catch {} } };
   const persist = () => { store.save(events); emit(); };
   const byId = (id) => events.find((e) => e.id === id) || null;
-  function getEvents() { return events.map((e) => ({ ...e })); }
+  function getEvents() { return events.map((e) => ({ ...e, ...(e.status === 'pending' && e.filePath && cacheStatus.has(e.filePath) ? { cacheStatus: cacheStatus.get(e.filePath) } : {}) })); }
 
   // ----- crash recovery: a live ffmpeg cannot survive an app restart -----
   let recovered = false;
@@ -53,6 +54,17 @@ function createScheduler({
   // look-ahead window (plus the slate files), and sweep the copies of anything
   // no longer upcoming/live. A LIVE class keeps its copy so a mid-class resume
   // still finds the file. Fire-and-forget: ensure() never throws or rejects.
+  // Class videos are cached by FILE, not by class: the same video scheduled
+  // twice (a replay) shares one copy. A copy is released only when no other
+  // upcoming or live class still uses that file (2026-09-04 audit).
+  const videoKey = (ev) => (cache && ev && ev.filePath) ? cache.keyForPath(ev.filePath) : '';
+  function releaseVideo(ev) {
+    if (!cache || !ev || !ev.filePath) return;
+    const stillUsed = events.some((e) => e !== ev && e.id !== ev.id && e.filePath === ev.filePath && (e.status === 'pending' || LIVE.includes(e.status)));
+    if (!stillUsed) cache.release(videoKey(ev));
+  }
+  const cacheStatus = new Map();   // filePath → 'ready' | 'pending' (transient; shown on upcoming rows)
+
   function cachePass() {
     if (!cache) return;
     try {
@@ -68,15 +80,16 @@ function createScheduler({
       const due = [];
       for (const ev of events) {
         if (!(ev.status === 'pending' || LIVE.includes(ev.status)) || !ev.filePath) continue;
-        keep.add(ev.id);
+        keep.add(videoKey(ev));
         if (ev.status === 'pending' && ev.fireAt - t <= cacheAheadMs) due.push(ev);
+        if (ev.status === 'pending') cacheStatus.set(ev.filePath, cache.resolve(videoKey(ev), ev.filePath) ? 'ready' : 'pending');
       }
       // Soonest first: the cache copies ONE file at a time, so the nearest class
       // must be served before a class that's hours away. But if a class is live
       // FROM THE NETWORK PATH (its copy wasn't ready), don't compete with that
       // live read by pulling other classes' files off the same drive now.
       const liveFromNetwork = !!(active && !active.fromCache);
-      if (!liveFromNetwork) for (const ev of due.sort((a, b) => a.fireAt - b.fireAt)) cache.ensure(ev.id, ev.filePath);
+      if (!liveFromNetwork) for (const ev of due.sort((a, b) => a.fireAt - b.fireAt)) cache.ensure(videoKey(ev), ev.filePath);
       cache.sweep(keep);
     } catch (e) { log('cache pass error: ' + ((e && e.message) || e)); }
   }
@@ -119,12 +132,14 @@ function createScheduler({
   }
 
   async function endPortal(ev) {
-    if (!ev || (!ev.contentItemGuid && !ev.scheduleGuid)) return;   // no class link → nothing to end
+    if (!ev || (!ev.contentItemGuid && !ev.scheduleGuid)) return true;   // no class link → nothing to end
     try {
       const r = await portal.endBroadcast({ contentItemGuid: ev.contentItemGuid, scheduleGuid: ev.scheduleGuid });
       log('portal end -> ' + (r && r.ok ? 'ok' : ('not confirmed: ' + ((r && (r.error || r.status)) || '?'))));
-    } catch (e) { log('portal end error: ' + (e && e.message)); }
+      return !!(r && r.ok);
+    } catch (e) { log('portal end error: ' + (e && e.message)); return false; }
   }
+  const portalNote = (confirmed) => (confirmed ? '' : ' · the portal did not confirm the end — check the studio’s status there');
 
   // The engine's failure reason can embed ffmpeg stderr, which on a connection
   // error prints the full output URL — INCLUDING the stream key. Scrub it before
@@ -148,12 +163,12 @@ function createScheduler({
     // source, so this is safe even if the drive is down right now. No copy ⇒
     // the original path, exactly as before.
     const local = (key, src) => (cache && src && cache.resolve(key, src)) || src;
-    const videoPath = local(ev.id, ev.filePath);
+    const videoPath = local(videoKey(ev), ev.filePath);
     const slateImage = local(cache ? cache.keyForPath(slateSrc) : '', slateSrc);
     const slateMusic = local(cache ? cache.keyForPath(s.slateMusic) : '', s.slateMusic);
     const useSlate = leadSec > 0 && !!slateImage;
     const bc = engineFactory({
-      videoPath, vertical: !!target.vertical, bitrateKbps: s.videoBitrate, fps: 30,
+      videoPath, vertical: !!target.vertical, bitrateKbps: s.videoBitrate, fps: ev.fps || 30,
       leadSec: useSlate ? leadSec : 0,
       fadeSec: (s.fadeMs || 0) / 1000,
       slateImage: useSlate ? slateImage : '', slateMusic: useSlate ? slateMusic : '',
@@ -163,7 +178,7 @@ function createScheduler({
     // Live from the DRIVE (copy not ready): stop this class's own copy at once —
     // a second full-speed read of the same file over the same drive starves the
     // broadcast (2026-09-04: a steady two-thirds of real time on a wired i9 PC).
-    if (!fromCache && cache && typeof cache.cancel === 'function') { try { cache.cancel(ev.id); } catch (e) { log('cache cancel error: ' + ((e && e.message) || e)); } }
+    if (!fromCache && cache && typeof cache.cancel === 'function') { try { cache.cancel(videoKey(ev)); } catch (e) { log('cache cancel error: ' + ((e && e.message) || e)); } }
     ev.playedFrom = fromCache ? 'local copy' : 'drive';
     ev.slow = null;
     active = { eventId: ev.id, broadcast: bc, target, sawPlaying: false, retried, resumeCount, fromCache };
@@ -190,7 +205,7 @@ function createScheduler({
     if (!active || active.eventId !== id || active.broadcast !== bc) return;
     const ev = byId(id); active = null;
     if (!ev) return;
-    if (ev.autoStop) { await endPortal(ev); ev.outcome = 'Played ✓ and the stream ended'; }
+    if (ev.autoStop) { const confirmed = await endPortal(ev); ev.outcome = 'Played ✓ and the stream ended' + portalNote(confirmed); }
     else { ev.outcome = 'Played ✓ — video finished (portal broadcast left open, as requested)'; }
     ev.outcome += playbackDetail(ev, bc);
     ev.slow = null;
@@ -268,6 +283,22 @@ function createScheduler({
     try { target = await portal.streamTarget({ contentItemGuid: ev.contentItemGuid, scheduleGuid: ev.scheduleGuid }); }
     catch (e) { fail(ev, 'the studio could not be reached: ' + ((e && e.message) || e)); return; }
     if (!target || !target.ok) { fail(ev, (target && target.error) || 'no studio was returned by the portal'); return; }
+    // A studio with only a plain rtmp:// address sends the key unencrypted. We
+    // still stream (that is how the studio is set up) but say so, loudly.
+    ev.unencrypted = /^rtmp:\/\//i.test(String(target.server || ''));
+    if (ev.unencrypted) log('WARNING: studio "' + (target.stationName || '') + '" uses an unencrypted (plain rtmp) address — the stream key travels in the clear');
+    // Re-validate the file right before air: a same-day re-export with the same
+    // name reached the engine unvalidated before (2026-09-04 audit). A probe
+    // that cannot run is not a reason to skip a class.
+    if (probeFile && ev.filePath) {
+      let p = null;
+      try { p = await probeFile(ev.filePath); } catch (e) { log('pre-air probe could not run: ' + ((e && e.message) || e)); }
+      if (p && p.ok === false) { fail(ev, p.error || 'the video file could not be validated'); return; }
+      if (p && p.ok) {
+        if (p.durationSec > 0) ev.durationSec = p.durationSec;
+        if (p.fps > 0) ev.fps = p.fps;
+      }
+    }
     // Starting late: no slate (the video should already be under way), and seek
     // in by exactly how late we are — the SAME resumeOffsetSec mechanism already
     // proven for the mid-broadcast-drop recovery path, just triggered by a late
@@ -374,7 +405,7 @@ function createScheduler({
     for (const k of ['fireAt', 'leadMs', 'durationSec']) next[k] = Number(next[k]) || 0;
     const merged = normalizeEvent({ ...next, id: ev.id, slotId: ev.slotId, status: 'pending', outcome: '', doneAt: 0 });
     merged.needsVideo = !merged.filePath;   // no video ⇒ still waiting for one (never goes live)
-    if (cache && merged.filePath !== ev.filePath) cache.release(ev.id);   // a different video ⇒ old copy is useless
+    if (cache && merged.filePath !== ev.filePath) releaseVideo(ev);   // a different video ⇒ old copy is useless (unless another class uses it)
     Object.assign(ev, merged);
     persist();
     cachePass();
@@ -392,7 +423,7 @@ function createScheduler({
     if (!ev.repeatWeekly) return { ok: false, error: 'Only a weekly class can be skipped — remove a one-off class instead.' };
     events = events.filter((e) => e.id !== id);   // drop this week FIRST: renew() treats a still-pending slot as "already renewed"
     renew(ev);
-    if (cache) cache.release(id);
+    releaseVideo(ev);
     persist();
     cachePass();
     return { ok: true };
@@ -401,10 +432,10 @@ function createScheduler({
   function removeEvent(id) {
     if (busy) return { ok: false, error: 'The scheduler is busy — try again in a moment.' };
     if (active && active.eventId === id) return { ok: false, error: 'Stop the live broadcast before removing it.' };
-    const before = events.length;
+    const ev = byId(id);
+    if (!ev) return { ok: false, error: 'That broadcast was not found.' };
     events = events.filter((e) => e.id !== id);
-    if (events.length === before) return { ok: false, error: 'That broadcast was not found.' };
-    if (cache) cache.release(id);
+    releaseVideo(ev);
     persist();
     return { ok: true };
   }
@@ -473,7 +504,7 @@ function createScheduler({
   // class already copied locally is healthy even if the network drive is down.
   function mediaPathsForHealth() {
     return events.filter((e) => e.status === 'pending' && e.filePath)
-      .map((e) => (cache && cache.resolve(e.id, e.filePath)) || e.filePath);
+      .map((e) => (cache && cache.resolve(videoKey(e), e.filePath)) || e.filePath);
   }
 
   return { tick, start, stop, shutdown, getEvents, addEvent, updateEvent, removeEvent, skipEvent, clearPast, stopActive, retryEvent, onChanged, isSafeToUpdate: safeToUpdate, cachePass, mediaPathsForHealth };

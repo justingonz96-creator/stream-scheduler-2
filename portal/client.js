@@ -41,10 +41,28 @@ function createPortalClient({ getConfig, transport, log = () => {}, now = () => 
     const r = await transport('POST', cfg.apiBase + '/auth',
       { headers: authedHeaders(cfg, null), body: { email: cfg.email, password: cfg.password } });
     log('login -> ' + r.status);
-    if (r.status === 0 || r.status >= 400) {
-      return { ok: false, error: 'The portal login failed — check the email and password in Setup.' };
+    // Say WHICH kind of failure this is. Reporting a dropped connection as
+    // "check the email and password" sent operators hunting for a login problem
+    // during a network blip (2026-09-04 audit).
+    if (r.status === 0) {
+      return { ok: false, error: 'The content portal could not be reached - check this computer\u2019s internet connection, then try again.' };
     }
-    return { ok: true, token: findToken(parseJson(r.text)) };   // no body token is OK: the cookie jar may carry the session
+    if (r.status === 401 || r.status === 403) {
+      return { ok: false, error: 'The portal login failed \u2014 check the email and password in Setup.' };
+    }
+    if (r.status >= 500) {
+      return { ok: false, error: 'The content portal is having trouble right now (error ' + r.status + '). Try again shortly.' };
+    }
+    if (r.status >= 400) {
+      return { ok: false, error: 'The portal refused the sign-in (error ' + r.status + ') \u2014 check the email and password in Setup.' };
+    }
+    // A 2xx is not proof of a session: some portals answer 200 with an HTML
+    // login page. Require a token in the body OR a session cookie.
+    const token = findToken(parseJson(r.text));
+    if (!token && !(r.cookies > 0)) {
+      return { ok: false, error: 'The portal sign-in did not complete \u2014 no session was returned. Check the email and password in Setup.' };
+    }
+    return { ok: true, token };
   }
 
   async function resolveOccurrences(cfg, token, contentItemGuid) {

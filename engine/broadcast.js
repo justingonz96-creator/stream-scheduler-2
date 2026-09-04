@@ -9,6 +9,8 @@ const VERIFY_AT_SEC = 0.5;      // out_time must pass this to count as "actually
 const STALL_TIMEOUT_MS = 20000; // once playing, this long with NO new video = a frozen encode
 const SLOW_SPEED = 0.9;         // ffmpeg speed= below this = falling behind the clock
 const SLOW_WINDOW_MS = 30000;   // …for this long continuously before we say so
+const MILD_SPEED = 0.985;       // a gentler drift (0.90–0.985x) — a class ends minutes late with no other sign…
+const MILD_WINDOW_MS = 300000;  // …so call it out after 5 minutes of it (2026-09-04 audit)
 
 /* One broadcast attempt = one Broadcast instance. start() may be called once; to
    retry a failed start or resume after a crash, create a NEW Broadcast (passing
@@ -66,7 +68,7 @@ function describeFailure(stderrTail) {
 // on Windows for every class, and closing it kills the stream (2026-09-04 audit).
 // env carries SSL_CERT_FILE so OpenSSL can verify an rtmps:// studio certificate.
 function spawnOptions() {
-  return { stdio: ['ignore', 'pipe', 'pipe'], env: ffmpeg.ffmpegEnv(), windowsHide: true };
+  return { stdio: ['pipe', 'pipe', 'pipe'], env: ffmpeg.ffmpegEnv(), windowsHide: true };   // stdin: ffmpeg's own 'q' = graceful stop
 }
 
 class Broadcast extends EventEmitter {
@@ -96,6 +98,27 @@ class Broadcast extends EventEmitter {
     this._speed = { last: null, min: null, sum: 0, samples: 0 };
     this._slowSince = null;
     this._slowReported = false;
+    this._mildSince = null;
+    this._mildReported = false;
+    this._stderrLine = '';
+  }
+
+  // Detection lines that the filter graph prints to stderr (metadata=print →
+  // pipe:2): lavfi.black_start/_end and lavfi.silence_start/_end. A dark or
+  // silent SLATE is not news, so nothing is reported until the class itself is
+  // under way (a few seconds past the lead-in).
+  _onStderr(chunk) {
+    this._stderrLine += String(chunk);
+    const lines = this._stderrLine.split('\n'); this._stderrLine = lines.pop();
+    for (const line of lines) {
+      const m = /lavfi\.(black|silence)_(start|end)=([\d.]+)/.exec(line);
+      if (!m) continue;
+      const kind = m[1] === 'black' ? 'black' : 'silent';
+      const inClass = this.outTimeSec > videoStartsAtSec(this.opts) + 5;
+      if (!inClass && m[2] === 'start') continue;
+      if (m[2] === 'start') { this._blank = this._blank || {}; this._blank[kind] = true; this.emit('blank', { kind, at: Number(m[3]) }); }
+      else if (this._blank && this._blank[kind]) { this._blank[kind] = false; this.emit('blank', { kind, ended: true, at: Number(m[3]) }); }
+    }
   }
 
   speedStats() {
@@ -115,6 +138,15 @@ class Broadcast extends EventEmitter {
     } else {
       this._slowSince = null;
       if (this._slowReported) { this._slowReported = false; this.emit('speedok', { speed: v }); }
+    }
+    // The gentle drift: never bad enough for the sharp signal, but a class at
+    // 0.95x for an hour ends three minutes late. Report it after 5 minutes.
+    if (v < MILD_SPEED) {
+      if (this._mildSince == null) this._mildSince = t;
+      if (!this._mildReported && !this._slowReported && t - this._mildSince >= MILD_WINDOW_MS) { this._mildReported = true; this.emit('slow', { speed: v, mild: true }); }
+    } else {
+      this._mildSince = null;
+      if (this._mildReported) { this._mildReported = false; this.emit('speedok', { speed: v }); }
     }
   }
 
@@ -137,6 +169,7 @@ class Broadcast extends EventEmitter {
     this._proc.stdout.on('data', (buf) => this._onProgressData(buf));   // -progress pipe:1 key=value lines
     this._proc.stderr.on('data', (buf) => {
       this._stderrTail = (this._stderrTail + String(buf)).slice(-2000);
+      this._onStderr(buf);
     });
     this._proc.on('close', (code) => {
       clearTimeout(this._startTimer);
@@ -219,9 +252,10 @@ class Broadcast extends EventEmitter {
   _checkStall() {
     if (this._finalized || this._stopping || !this._playing) return;
     const stallMs = this.opts.stallTimeoutMs == null ? STALL_TIMEOUT_MS : this.opts.stallTimeoutMs;
-    if (this._now() - this._lastAdvanceAt < stallMs) return;   // still advancing recently → fine
+    const frozenMs = this._now() - this._lastAdvanceAt;
+    if (frozenMs < stallMs) return;   // still advancing recently → fine
     clearInterval(this._stallTimer); this._stallTimer = null;
-    this._fail('The broadcast froze — no new video was sent for about ' + Math.round(stallMs / 1000) +
+    this._fail('The broadcast froze — no new video was sent for ' + Math.round(frozenMs / 1000) +
       ' seconds. It can be resumed.');
     try { if (this._proc) this._proc.kill('SIGKILL'); } catch { /* already gone */ }
   }
@@ -238,9 +272,18 @@ class Broadcast extends EventEmitter {
       if (this._stopping) { resolve(); return; }
       if (!this._proc || this._proc.exitCode !== null) { resolve(); return; }
       this._stopping = true;
-      const killTimer = setTimeout(() => { try { this._proc.kill('SIGKILL'); } catch {} }, 3000);
-      this._proc.on('close', () => { clearTimeout(killTimer); resolve(); });
-      try { this._proc.kill('SIGTERM'); } catch { clearTimeout(killTimer); resolve(); }
+      // Graceful first: ffmpeg's own 'q' finishes the file/stream properly and
+      // exits 0 on every platform (a Windows SIGTERM is just TerminateProcess,
+      // which cannot flush). MEASURED 2026-09-04 with this arg set: q → exit 0
+      // in ~6 s (the output pacing filter drains its buffer at real time),
+      // SIGINT → exit 255 in ~3 s, SIGTERM → exit 255 in ~5 s. So allow the
+      // graceful path real time before escalating, or it never gets to finish.
+      const graceMs = this.opts.stopGraceMs == null ? 9000 : this.opts.stopGraceMs;
+      const intTimer = setTimeout(() => { try { this._proc.kill('SIGINT'); } catch {} }, graceMs);
+      const killTimer = setTimeout(() => { try { this._proc.kill('SIGKILL'); } catch {} }, graceMs + 4000);
+      this._proc.on('close', () => { clearTimeout(intTimer); clearTimeout(killTimer); resolve(); });
+      try { this._proc.stdin.write('q\n'); }
+      catch { try { this._proc.kill('SIGINT'); } catch { clearTimeout(intTimer); clearTimeout(killTimer); resolve(); } }
     });
   }
 }

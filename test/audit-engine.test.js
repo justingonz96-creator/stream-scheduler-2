@@ -34,7 +34,7 @@ test('the encoder is told the colour signalling too (VUI), so players read tv/bt
 test('ffmpeg is spawned hidden on Windows, with the CA-aware environment', () => {
   const o = spawnOptions();
   assert.equal(o.windowsHide, true);
-  assert.deepEqual(o.stdio, ['ignore', 'pipe', 'pipe']);
+  assert.deepEqual(o.stdio, ['pipe', 'pipe', 'pipe'], 'stdin is a pipe: ffmpeg\'s own q is the graceful stop');
   assert.ok(o.env && typeof o.env === 'object');
 });
 

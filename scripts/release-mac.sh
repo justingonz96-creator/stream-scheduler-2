@@ -32,7 +32,9 @@ echo "→ Building, signing, and notarizing…";        npm run dist:mac
 
 APP="dist/mac-universal/Stream Scheduler 2.app"
 echo "→ Verifying the result…"
-bash scripts/verify-signing.sh "$APP" || true
+# A build that fails signing/notarization verification must NOT be shipped —
+# stop here loudly instead of printing "Done" (2026-09-04 audit).
+bash scripts/verify-signing.sh "$APP" || { echo; echo "✗ Verification FAILED — do not publish these installers."; exit 1; }
 echo
 echo "Done. Installers are in dist/ :"
 ls -1 dist/*.dmg dist/*.zip 2>/dev/null | sed 's/^/   /'

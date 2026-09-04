@@ -27,9 +27,12 @@ function createTransport({ timeoutMs = 25000 } = {}) {
         const m = /^([^=;]+)=([^;]*)/.exec(sc);
         if (m) jar.set(m[1].trim(), m[2]);
       }
-      return { status: res.status, text: await res.text() };
+      // cookies: how many session cookies the jar holds after this call. The
+      // portal may carry the session in a cookie rather than a body token, so
+      // login() needs this to tell a real sign-in from a 200 with no session.
+      return { status: res.status, text: await res.text(), cookies: jar.size };
     } catch (e) {
-      return { status: 0, text: String(e && e.message || e) };
+      return { status: 0, text: String(e && e.message || e), cookies: jar.size };
     } finally {
       clearTimeout(timer);
     }

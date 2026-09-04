@@ -83,16 +83,30 @@ function parseDateTime(dateStr, hour, min, ap) {
 // and minus any already dismissed this session.
 function recentFailures(events, afterMs, dismissed) {
   const seen = dismissed || new Set();
+  // A crash-recovered "Interrupted" class is stamped by the main process BEFORE
+  // the window opens, so the plain after-open test missed it (2026-09-04 audit):
+  // surface one from the last 24 h regardless.
+  const day = 24 * 3600 * 1000;
   return (events || []).filter((e) =>
     (e.status === 'failed' || (e.status === 'missed' && !e.needsVideo)) &&
-    (e.doneAt || 0) > (afterMs || 0) &&
+    ((e.doneAt || 0) > (afterMs || 0) || (/^Interrupted/.test(e.outcome || '') && (e.doneAt || 0) > (afterMs || 0) - day)) &&
     !(seen.has && seen.has(e.id)));
+}
+
+// A local time that does not exist on that day (the clocks-jump-forward hour).
+// parseDateTime would silently land an hour later; say so instead.
+function dstGapWarning(dateStr, hour, min, ap) {
+  const t = parseDateTime(dateStr, hour, min, ap);
+  if (!t) return '';
+  let h = parseInt(hour, 10); if (ap === 'AM') { if (h === 12) h = 0; } else if (h !== 12) h += 12;
+  const d = new Date(t);
+  return d.getHours() === h ? '' : 'That time does not exist on that day — the clocks skip forward. Pick a time an hour later (or earlier).';
 }
 
 // Just the file name from a path (either slash style) — the Setup screen shows a
 // chosen slate by name; the full path lives in a tooltip.
 function fileName(p) { const s = p == null ? '' : String(p); return s.split(/[\\/]/).pop(); }
 
-const FMT_API = { fmtClock, fmtDateTime, statusPill, endsAround, buildTimeOptions, orientationLabel, parseDateTime, splitDateTime, fmtCountdown, recentFailures, fileName };
+const FMT_API = { fmtClock, fmtDateTime, statusPill, endsAround, buildTimeOptions, orientationLabel, parseDateTime, splitDateTime, fmtCountdown, recentFailures, fileName, dstGapWarning };
 if (typeof module !== 'undefined' && module.exports) module.exports = FMT_API;
 if (typeof window !== 'undefined') window.Fmt = FMT_API;

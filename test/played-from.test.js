@@ -37,9 +37,9 @@ const settle = () => new Promise((r) => setImmediate(r));
 test('going live from the DRIVE cancels that class\'s own in-flight copy; from the local copy it does not', async () => {
   const a = harness({ cache: fakeCache({}) });
   await a.sched.tick();
-  assert.deepEqual(a.cache.cancelled, ['e1'], 'copy of the live class cancelled');
+  assert.deepEqual(a.cache.cancelled, ['k-/drive/class.mp4'], 'copy of the live class cancelled');
   assert.equal(a.ev().playedFrom, 'drive');
-  const b = harness({ cache: fakeCache({ e1: '/local/e1.mp4' }) });
+  const b = harness({ cache: fakeCache({ 'k-/drive/class.mp4': '/local/e1.mp4' }) });
   await b.sched.tick();
   assert.deepEqual(b.cache.cancelled, [], 'nothing to cancel — it played from the copy');
   assert.equal(b.ev().playedFrom, 'local copy');
@@ -68,7 +68,7 @@ test("'slow' from the engine is persisted on the event (and cleared on 'speedok'
 });
 
 test('a healthy class says so, plainly, without speed noise', async () => {
-  const h = harness({ cache: fakeCache({ e1: '/local/e1.mp4' }), stats: { last: 1.0, min: 0.99, avg: 1.0, samples: 100 } });
+  const h = harness({ cache: fakeCache({ 'k-/drive/class.mp4': '/local/e1.mp4' }), stats: { last: 1.0, min: 0.99, avg: 1.0, samples: 100 } });
   await h.sched.tick();
   h.spawned[0].emit('playing'); h.spawned[0].emit('ended'); await settle();
   assert.match(h.ev().outcome, /local copy/i);

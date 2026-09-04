@@ -33,7 +33,7 @@ test('go-live plays from the local copy after the source file has vanished (netw
 
   const ev = sched.addEvent({ title: 'T', fireAt: 3600000, leadMs: 300000, filePath: src, durationSec: 60, contentItemGuid: 'ci', scheduleGuid: 'sg' });
   // addEvent kicked off the copies; wait for them to land.
-  const cachedVideo = await cache.ensure(ev.id, src);
+  const cachedVideo = await cache.ensure(cache.keyForPath(src), src);   // copies are keyed by FILE (shared between classes)
   await cache.ensure(cache.keyForPath(slate), slate);
   await cache.ensure(cache.keyForPath(music), music);
   assert.ok(cachedVideo && fs.existsSync(cachedVideo), 'video copied locally');
