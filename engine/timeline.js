@@ -28,10 +28,17 @@ function buildBroadcastArgs(o) {
 
   if (hasSlatePhase(o)) {
     const span = o.leadSec + fade;                       // slate persists through the fade
-    args.push('-re', '-loop', '1', '-framerate', String(fps), '-t', String(span), '-i', o.slateImage);
-    if (o.slateMusic) args.push('-re', '-stream_loop', '-1', '-t', String(span), '-i', o.slateMusic);
+    // NO -re on any input. Pacing happens once, at the OUTPUT (realtime on
+    // video + arealtime on audio, below). Per-input -re paces by packet
+    // timestamps, and the studio's export tool writes files in ~⅓ s chunks of
+    // video then audio; once the class input has waited behind the slate, -re
+    // on such a file throttled the whole encode to ~0.70x (20 fps, ⅔ bitrate at
+    // the platform, class ends late). Proven 2026-09-04 with a real export on a
+    // Mac and on the studio PC; output pacing ran 0.999x on every path.
+    args.push('-loop', '1', '-framerate', String(fps), '-t', String(span), '-i', o.slateImage);
+    if (o.slateMusic) args.push('-stream_loop', '-1', '-t', String(span), '-i', o.slateMusic);
     else args.push('-f', 'lavfi', '-t', String(span), '-i', SLATE_AUDIO_SILENT);
-    args.push('-re', '-i', o.videoPath);
+    args.push('-i', o.videoPath);
     filter = [
       `[0:v]${fit}[slv]`,
       `[2:v]${fit}[vv]`,
@@ -45,12 +52,12 @@ function buildBroadcastArgs(o) {
       `[slv][vv]xfade=transition=fade:duration=${fade}:offset=${o.leadSec},realtime,format=yuv420p[vout]`,
       `[1:a]${afmt}[sla]`,
       `[2:a]${afmt}[va]`,
-      `[sla][va]acrossfade=d=${fade}[aout]`,
+      `[sla][va]acrossfade=d=${fade},arealtime[aout]`,
     ].join(';');
   } else {
     if ((o.resumeOffsetSec || 0) > 0) args.push('-ss', String(o.resumeOffsetSec));
-    args.push('-re', '-i', o.videoPath);
-    filter = [`[0:v]${fit},format=yuv420p[vout]`, `[0:a]${afmt}[aout]`].join(';');
+    args.push('-i', o.videoPath);   // no -re: see the slate path — the plain path ran 0.54x on a real export with it
+    filter = [`[0:v]${fit},realtime,format=yuv420p[vout]`, `[0:a]${afmt},arealtime[aout]`].join(';');
   }
 
   args.push(

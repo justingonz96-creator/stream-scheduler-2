@@ -62,9 +62,16 @@ test('slate path is realtime-paced (regression: multi-input -re under-paces with
     'slate video chain must be xfade → realtime → format=yuv420p → [vout]');
 });
 
-test('the proven-good plain + resume paths are NOT touched (no realtime added)', () => {
-  assert.ok(!buildBroadcastArgs({ ...BASE, leadSec: 0 }).join(' ').includes('realtime'), 'plain path unchanged');
-  assert.ok(!buildBroadcastArgs({ ...BASE, resumeOffsetSec: 372 }).join(' ').includes('realtime'), 'resume path unchanged');
+test('the plain + resume paths are output-paced too (they ran 0.54x on a real export with -re)', () => {
+  // Superseded 2026-09-04: these paths were "proven good" only on synthetic
+  // files. With a real Mainconcept export they under-paced badly. Same law as
+  // the slate path now: no -re, realtime on video, arealtime on audio.
+  for (const opts of [{ ...BASE, leadSec: 0 }, { ...BASE, resumeOffsetSec: 300 }]) {
+    const s = buildBroadcastArgs(opts).join(' ');
+    assert.ok(!s.includes(' -re '), 'no input pacing');
+    assert.ok(/,realtime,format=yuv420p\[vout\]/.test(s), 'video paced at the output');
+    assert.ok(/,arealtime\[aout\]/.test(s), 'audio paced at the output');
+  }
 });
 
 test('videoStartsAtSec: lead with slate, 0 otherwise', () => {
