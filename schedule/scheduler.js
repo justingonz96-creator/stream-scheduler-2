@@ -123,7 +123,8 @@ function createScheduler({
   // plus the encoder's real speed — but only when it failed to keep up, so a
   // healthy class stays a clean "Played ✓".
   function playbackDetail(ev, bc) {
-    let s = ev.playedFrom ? ' · played from the ' + ev.playedFrom : '';
+    let s = ev.playedFrom ? ' \u00b7 played from the ' + ev.playedFrom : '';
+    if (ev.blankSeen) s += ' \u00b7 warning: the ' + (ev.blankSeen === 'black' ? 'picture went black' : 'sound went silent') + ' during this class';
     const st = bc && typeof bc.speedStats === 'function' ? bc.speedStats() : null;
     if (st && st.samples && st.min != null && st.min < 0.9) {
       s += ' · encoder could not keep up: min ' + st.min.toFixed(2) + '×, average ' + st.avg.toFixed(2) + '× of real time';
@@ -189,6 +190,15 @@ function createScheduler({
     // warns while it is happening, and clear it when it recovers.
     bc.on('slow', (info) => { if (active && active.broadcast === bc) { ev.slow = { speed: info && info.speed, at: now() }; log('encoder running slow: ' + (info && info.speed) + 'x — ' + (ev.title || ev.fileName || ev.id) + ' (' + ev.playedFrom + ')'); persist(); } });
     bc.on('speedok', () => { if (active && active.broadcast === bc) { ev.slow = null; log('encoder back to real time'); persist(); } });
+    // The picture went black / the sound went silent while the class was under
+    // way: a stream that looks perfectly healthy but shows nothing (audit #24).
+    bc.on('blank', (info) => {
+      if (!active || active.broadcast !== bc) return;
+      const kind = info && info.kind;
+      if (info && info.ended) { if (ev.blank && ev.blank.kind === kind) ev.blank = null; }
+      else { ev.blank = { kind, at: now() }; ev.blankSeen = kind; log('WARNING: the ' + (kind === 'black' ? 'picture is black' : 'sound is silent') + ' on air — ' + (ev.title || ev.fileName || ev.id)); }
+      persist();
+    });
     try { bc.start(); }
     catch (e) { onFailed(ev.id, (e && e.message) || 'the video engine could not start', bc).catch(() => {}); }
   }
@@ -208,7 +218,7 @@ function createScheduler({
     if (ev.autoStop) { const confirmed = await endPortal(ev); ev.outcome = 'Played ✓ and the stream ended' + portalNote(confirmed); }
     else { ev.outcome = 'Played ✓ — video finished (portal broadcast left open, as requested)'; }
     ev.outcome += playbackDetail(ev, bc);
-    ev.slow = null;
+    ev.slow = null; ev.blank = null;
     ev.status = 'done'; ev.doneAt = now();
     renew(ev); persist();
   }
@@ -502,12 +512,19 @@ function createScheduler({
 
   // What the connection health check should probe for "scheduled videos": a
   // class already copied locally is healthy even if the network drive is down.
+  // The slate files as the broadcast would actually read them (local copy first).
+  function slatePathsForHealth() {
+    const s = settings.get();
+    return [s.slateImage, s.slateImageVertical, s.slateMusic].filter(Boolean)
+      .map((p) => (cache && cache.resolve(cache.keyForPath(p), p)) || p);
+  }
+
   function mediaPathsForHealth() {
     return events.filter((e) => e.status === 'pending' && e.filePath)
       .map((e) => (cache && cache.resolve(videoKey(e), e.filePath)) || e.filePath);
   }
 
-  return { tick, start, stop, shutdown, getEvents, addEvent, updateEvent, removeEvent, skipEvent, clearPast, stopActive, retryEvent, onChanged, isSafeToUpdate: safeToUpdate, cachePass, mediaPathsForHealth };
+  return { tick, start, stop, shutdown, getEvents, addEvent, updateEvent, removeEvent, skipEvent, clearPast, stopActive, retryEvent, onChanged, isSafeToUpdate: safeToUpdate, cachePass, mediaPathsForHealth, slatePathsForHealth };
 }
 
 module.exports = { createScheduler };

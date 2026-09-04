@@ -194,6 +194,7 @@ if (process.argv.includes('--selfcheck')) {
       getStreamServers,
       probeServer: (server) => ffmpeg.probeIngest(server),   // the SAME engine that will stream to it
       getVideoPaths: () => scheduler.mediaPathsForHealth(),   // local copy counts as healthy even if the drive is down
+      getSlatePaths: () => scheduler.slatePathsForHealth(),
       onChanged: (state) => { if (win && !win.isDestroyed()) win.webContents.send('health:changed', state); },
       log: tagLog('health'),
     });
@@ -206,6 +207,11 @@ if (process.argv.includes('--selfcheck')) {
       image: [{ name: 'Image', extensions: ['png', 'jpg', 'jpeg'] }],
       audio: [{ name: 'Audio', extensions: ['mp3', 'm4a', 'wav'] }],
     };
+    // Let the operator reach the log file without hunting for a hidden folder.
+    ipcMain.handle('log:show', async () => {
+      try { shell.showItemInFolder(logFile.path); return { ok: true, path: logFile.path }; }
+      catch (e) { return { ok: false, error: (e && e.message) || String(e) }; }
+    });
     ipcMain.handle('dialog:openFile', async (_e, payload) => {
       const kind = (payload && payload.kind) || 'video';
       const res = await dialog.showOpenDialog(win, { properties: ['openFile'], filters: FILTERS[kind] || FILTERS.video });

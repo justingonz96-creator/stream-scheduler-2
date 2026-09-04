@@ -54,6 +54,15 @@ if (typeof document !== 'undefined') {
     applyPhase();
   }
 
+  // A time that does not exist on that day (the clocks-jump-forward hour) would
+  // silently land an hour later — say so instead (2026-09-04 audit).
+  function showDstWarning() {
+    const el = $('whenDstWarn'); if (!el) return;
+    const w = F.dstGapWarning($('evDate').value, $('evHour').value, $('evMin').value, $('evAP').value);
+    el.textContent = w ? '⚠ ' + w : '';
+    el.className = w ? 'pickstatus bad' : 'pickstatus';
+  }
+
   function updateWhenUI() {
     $('whenLater').className = form.startNow ? 'hidden' : '';
     const hint = $('whenNowHint');
@@ -296,11 +305,18 @@ if (typeof document !== 'undefined') {
     if (live) {
       const from = live.playedFrom ? 'Playing from the ' + live.playedFrom + '.' : '';
       const slow = live.slow && live.slow.speed != null
-        ? ' ⚠ Falling behind — running at ' + Number(live.slow.speed).toFixed(2) + '× real time. Viewers will see stutter and the class will end late. ' +
-          (live.playedFrom === 'drive' ? 'The video is being read from the network drive; that drive is likely too slow.' : 'This computer is not keeping up with the encode.')
+        ? (live.slow.mild
+          ? ' ⚠ Running slightly slow — ' + Number(live.slow.speed).toFixed(2) + '× real time, so this class will finish a few minutes late.'
+          : ' ⚠ Falling behind — running at ' + Number(live.slow.speed).toFixed(2) + '× real time. Viewers will see stutter and the class will end late. ' +
+            (live.playedFrom === 'drive' ? 'The video is being read from the network drive; that drive is likely too slow.' : 'This computer is not keeping up with the encode.'))
         : '';
-      $('liveSub').textContent = (from + slow).trim();
-      $('liveBar').classList.toggle('slow', !!slow);
+      const blank = live.blank
+        ? (live.blank.kind === 'black'
+          ? ' ⛔ The picture is BLACK right now — the stream is running but viewers see nothing.'
+          : ' ⛔ The sound is SILENT right now — the stream is running but viewers hear nothing.')
+        : '';
+      $('liveSub').textContent = (from + blank + slow).trim();
+      $('liveBar').classList.toggle('slow', !!(slow || blank));
     }
     $('upcomingList').innerHTML = '';
     if (up.length === 0) $('upcomingList').innerHTML = '<div class="sched-empty">Upcoming classes will appear here.</div>';
@@ -324,7 +340,10 @@ if (typeof document !== 'undefined') {
     const ends = (ev.status === 'failed' || ev.status === 'missed') ? '' : F.endsAround(ev);   // "ends around…" is misleading on events that never played
     const station = (upcoming && ev.stationName) ? ' → ' + ev.stationName : '';
     const slate = (upcoming && ev.status === 'pending' && ev.leadMs > 0) ? ' · slate from ' + F.fmtClock(ev.fireAt - ev.leadMs) : '';
-    const sub = [F.fmtDateTime(ev.fireAt) + slate, ends, (!upcoming && ev.outcome) ? ev.outcome : '']
+    // Whether this class will play from a local copy or straight off the drive.
+    const copy = (upcoming && ev.status === 'pending' && ev.filePath && ev.cacheStatus)
+      ? (ev.cacheStatus === 'ready' ? ' · copied to this computer' : ' · still copying from the drive') : '';
+    const sub = [F.fmtDateTime(ev.fireAt) + slate + copy, ends, (!upcoming && ev.outcome) ? ev.outcome : '']
       .filter(Boolean).join(' · ');
     // Stable two-part row: a min-width:0 content column (so long names wrap instead
     // of overflowing) + a fixed action group that never gets shoved off-screen.
@@ -528,7 +547,7 @@ if (typeof document !== 'undefined') {
     // wire buttons
     $('btnNew').onclick = showForm; $('btnCancel').onclick = hideForm;
     $('btnPickVideo').onclick = pickVideo; $('btnChangeVideo').onclick = () => { form.filePath = ''; form.durationSec = 0; $('fileCheck').textContent = ''; applyPhase(); };
-    for (const id of ['evDate', 'evHour', 'evMin', 'evAP']) $(id).addEventListener('change', recomputeFireAt);
+    for (const id of ['evDate', 'evHour', 'evMin', 'evAP']) $(id).addEventListener('change', () => { recomputeFireAt(); showDstWarning(); });
     $('evWhen').addEventListener('change', () => { form.startNow = $('evWhen').value === 'now'; recomputeFireAt(); });
     $('evLead').addEventListener('change', recomputeFireAt);
     $('btnEvPortalCheck').onclick = checkLink; $('btnSave').onclick = save;
@@ -537,6 +556,10 @@ if (typeof document !== 'undefined') {
     $('btnPickSlateImage').onclick = async () => { const p = await api.invoke('dialog:openFile', { kind: 'image' }); if (p) setSlatePath('setSlateImage', p); };
     $('btnPickSlateImageVertical').onclick = async () => { const p = await api.invoke('dialog:openFile', { kind: 'image' }); if (p) setSlatePath('setSlateImageVertical', p); };
     $('btnPickSlateMusic').onclick = async () => { const p = await api.invoke('dialog:openFile', { kind: 'audio' }); if (p) setSlatePath('setSlateMusic', p); };
+    $('btnShowLog').onclick = async () => {
+      const r = await api.invoke('log:show');
+      if (!r || !r.ok) alert((r && r.error) || 'The log file could not be opened.');
+    };
     $('btnClearSlateImage').onclick = () => setSlatePath('setSlateImage', '');
     $('btnClearSlateImageVertical').onclick = () => setSlatePath('setSlateImageVertical', '');
     $('btnClearSlateMusic').onclick = () => setSlatePath('setSlateMusic', '');

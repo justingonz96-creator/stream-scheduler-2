@@ -14,7 +14,7 @@ async function mapLimit(items, limit, fn) {
   return out;
 }
 
-function createHealthController({ portal, ffmpeg, settings, fileOk = async () => true, getVideoPaths = () => [], getStreamServers = async () => [], probeServer = null, isLive = () => false, checkTimeoutMs = 60000, intervalMs = 3 * 60 * 60 * 1000, now = () => Date.now(), onChanged = () => {}, log = () => {} }) {
+function createHealthController({ portal, ffmpeg, settings, fileOk = async () => true, getVideoPaths = () => [], getStreamServers = async () => [], probeServer = null, getSlatePaths = null, isLive = () => false, checkTimeoutMs = 60000, intervalMs = 3 * 60 * 60 * 1000, now = () => Date.now(), onChanged = () => {}, log = () => {} }) {
   let state = { at: 0, ok: null, checking: false, checks: [] };   // ok:null = never checked yet
   let timer = null;
 
@@ -53,9 +53,14 @@ function createHealthController({ portal, ffmpeg, settings, fileOk = async () =>
     // drops, they vanish and a class's slate fails. Check the configured ones.
     const slate = await runOne('slate', 'Slate files', async () => {
       const s = settings.get();
-      const entries = [['widescreen slate', s.slateImage], ['vertical slate', s.slateImageVertical], ['slate music', s.slateMusic]].filter(([, p]) => p);
+      // Prefer the LOCAL copies (the cache keeps the slate files too): probing
+      // the raw network path raised a scary "drive down" alarm for a class that
+      // would have aired perfectly from the copy (2026-09-04 audit).
+      const entries = getSlatePaths
+        ? getSlatePaths().filter(Boolean).map((p, i) => ['slate file ' + (i + 1), p])
+        : [['widescreen slate', s.slateImage], ['vertical slate', s.slateImageVertical], ['slate music', s.slateMusic]].filter(([, p]) => p);
       if (!entries.length) return { ok: true, detail: 'none set' };
-      if (isLive()) return { ok: true, detail: 'not probed — a class is on air' };
+      if (isLive()) return { ok: true, detail: 'not probed \u2014 a class is on air' };
       const results = await mapLimit(entries, 2, async ([label, p]) => [label, await fileOk(p)]);
       const missing = results.filter(([, ok]) => !ok).map(([label]) => label);
       return missing.length ? { ok: false, detail: 'can’t reach ' + missing.join(', ') + ' — is the network drive connected?' }

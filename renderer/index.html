@@ -94,6 +94,7 @@
             </div>
           </div>
           <div class="pickstatus" id="whenNowHint" aria-live="polite"></div>
+          <div class="pickstatus" id="whenDstWarn" aria-live="polite"></div>
         </div>
 
         <div class="field">
@@ -207,6 +208,9 @@
           <div class="fhint">Stored only on this computer, in your operating system's secure keychain.</div></div>
         <div class="field"><label class="flabel" for="setPortalApiKey">Portal API key <span style="font-weight:400;color:var(--ink-soft)">(optional)</span></label>
           <input type="password" id="setPortalApiKey" placeholder="leave blank to start" autocomplete="off"></div>
+        <div class="field" style="margin-top:12px;">
+          <label class="flabel">Activity log <span class="flabel-soft">what the app has been doing — useful when something goes wrong</span></label>
+          <button id="btnShowLog" type="button" class="btn-ghost">Show the log file</button></div>
         <div class="field" style="margin-top:12px;"><label class="flabel" for="setLaunchAtLogin"><input type="checkbox" id="setLaunchAtLogin"> Start Stream Scheduler when I log in <span class="flabel-soft">so a reboot doesn't leave the schedule dead</span></label></div>
         <div style="margin-top:16px;">
           <button class="btn-quiet btn-small" id="btnPortalTest" type="button">Test login</button>

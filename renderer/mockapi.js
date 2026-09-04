@@ -58,6 +58,7 @@ function createMockApi(seed = {}) {
       case 'schedule:stop': return { ok: true };
       case 'schedule:retry': return { ok: true };
       case 'schedule:skip': return { ok: true };
+      case 'log:show': return { ok: true, path: '/tmp/app.log' };
       case 'update:getState': return { ...updateState };
       case 'update:install': {
         if (!updateState.safe) return { ok: false, error: updateState.reason };

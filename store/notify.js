@@ -13,8 +13,12 @@ function notificationsFor(prev, next) {
       out.push({ id: ev.id, kind: 'failed', title: 'Class did not air', body: name + ': ' + (ev.outcome || 'the broadcast failed') });
     } else if (ev.status === 'missed' && (!was || was.status !== 'missed') && !(ev.needsVideo && !ev.outcome)) {
       out.push({ id: ev.id, kind: 'missed', title: 'Class was missed', body: name + ': ' + (ev.outcome || 'it did not start in time') });
+    } else if (ev.blank && !(was && was.blank)) {
+      out.push({ id: ev.id, kind: 'blank', title: ev.blank.kind === 'black' ? 'Class picture is black' : 'Class sound is silent',
+        body: name + ': the stream is running but the ' + (ev.blank.kind === 'black' ? 'picture is black' : 'sound is silent') });
     } else if (ev.slow && !(was && was.slow)) {
-      out.push({ id: ev.id, kind: 'slow', title: 'Class is falling behind', body: name + ' is running at ' + Number(ev.slow.speed).toFixed(2) + '× real time — viewers may see stutter' });
+      out.push({ id: ev.id, kind: 'slow', title: ev.slow.mild ? 'Class is running slightly slow' : 'Class is falling behind',
+        body: name + ' is running at ' + Number(ev.slow.speed).toFixed(2) + '\u00d7 real time' + (ev.slow.mild ? ' — it will finish late' : ' — viewers may see stutter') });
     }
   }
   return out;
