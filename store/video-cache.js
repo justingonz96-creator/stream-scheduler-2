@@ -30,6 +30,8 @@ function createVideoCache({
   dir, log = () => {}, now = () => Date.now(),
   stat = (p) => fs.promises.stat(p),
   openRead = (p) => fs.createReadStream(p),
+  rename = (a, b) => fs.renameSync(a, b),       // injectable: Windows AV/indexers briefly lock a fresh file
+  sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
   freeSpace = defaultFreeSpace,        // → { free, total } bytes (a bare number = free)
   statTimeoutMs = 4000,                // how long ensure() makes a CALLER wait before answering "not ready" (the raw op keeps going)
   copyIdleTimeoutMs = 60000,           // no bytes for this long mid-copy = stalled drive
@@ -141,7 +143,18 @@ function createVideoCache({
       let after = null;
       try { after = await stat(src); } catch { /* gone → keep the verified copy */ }
       if (after && (after.size !== st.size || after.mtimeMs !== st.mtimeMs)) throw new Error('source changed during the copy (still being written?)');
-      fs.renameSync(part, f);
+      // The .part → final rename can fail transiently on Windows (an antivirus or
+      // indexer still holds the fresh file). Retry briefly instead of throwing a
+      // multi-GB copy away (2026-09-04 audit).
+      for (let attempt = 1; ; attempt++) {
+        try { rename(part, f); break; }
+        catch (e) {
+          const transient = e && ['EPERM', 'EBUSY', 'EACCES'].includes(e.code);
+          if (!transient || attempt >= 6) throw e;
+          log('cache: finalize retry ' + attempt + ' for ' + path.basename(src) + ' (' + e.code + ' — file briefly locked)');
+          await sleep(500 * attempt);
+        }
+      }
       fs.writeFileSync(metaPath(f), JSON.stringify({ src, size: st.size, mtimeMs: st.mtimeMs, cachedAt: Date.now() }));
       log('cache: ready ' + path.basename(src) + ' (' + st.size + ' bytes)');
       return f;

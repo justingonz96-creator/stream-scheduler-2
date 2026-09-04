@@ -457,12 +457,19 @@ if (typeof document !== 'undefined') {
     const presets = ['2500', '4500', '6000'];
     if (presets.includes(String(s.videoBitrate))) { $('setBitratePreset').value = String(s.videoBitrate); $('setBitrateCustom').style.display = 'none'; }
     else { $('setBitratePreset').value = 'custom'; $('setBitrateCustom').style.display = ''; $('setBitrateCustom').value = s.videoBitrate; }
-    $('setPortalEmail').value = s.portalEmail || ''; $('setPortalApiKey').value = s.portalApiKey || '';
+    $('setPortalEmail').value = s.portalEmail || '';
+    // Secrets are never echoed back. Show that one is saved; blank = keep it.
+    $('setPortalApiKey').value = ''; $('setPortalPassword').value = '';
+    const [hasPw, hasKey] = await Promise.all([api.invoke('secret:hasPassword'), api.invoke('secret:hasApiKey')]);
+    $('setPortalPassword').placeholder = hasPw ? '•••••••• saved — leave blank to keep' : 'your content portal password';
+    $('setPortalApiKey').placeholder = hasKey ? '•••••••• saved — leave blank to keep' : 'leave blank to start';
     $('setLaunchAtLogin').checked = !!s.launchAtLogin;
   }
   function chosenBitrate() { const p = $('setBitratePreset').value; return p === 'custom' ? (parseInt($('setBitrateCustom').value, 10) || 6000) : parseInt(p, 10); }
   async function saveSetup() {
-    await api.invoke('settings:save', { slateImage: slatePath('setSlateImage'), slateImageVertical: slatePath('setSlateImageVertical'), slateMusic: slatePath('setSlateMusic'), fadeMs: parseInt($('setFade').value, 10), videoBitrate: chosenBitrate(), portalEmail: $('setPortalEmail').value.trim(), portalApiKey: $('setPortalApiKey').value.trim(), launchAtLogin: $('setLaunchAtLogin').checked });
+    await api.invoke('settings:save', { slateImage: slatePath('setSlateImage'), slateImageVertical: slatePath('setSlateImageVertical'), slateMusic: slatePath('setSlateMusic'), fadeMs: parseInt($('setFade').value, 10), videoBitrate: chosenBitrate(), portalEmail: $('setPortalEmail').value.trim(), launchAtLogin: $('setLaunchAtLogin').checked });
+    const key = $('setPortalApiKey').value.trim();
+    if (key) { const r = await api.invoke('secret:setApiKey', key); if (!r || !r.ok) alert((r && r.error) || 'The API key could not be saved.'); $('setPortalApiKey').value = ''; }
     const pw = $('setPortalPassword').value; if (pw) { await api.invoke('secret:setPassword', pw); $('setPortalPassword').value = ''; }
     hasSlateConfigured = !!(slatePath('setSlateImage') || slatePath('setSlateImageVertical'));
     showView('main');

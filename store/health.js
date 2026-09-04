@@ -5,7 +5,7 @@
 // at startup, and on demand — so the operator is warned BEFORE a class fails, instead
 // of discovering a silent failure in the history afterwards. Every dependency is
 // injected, so the whole thing runs offline under node:test.
-function createHealthController({ portal, ffmpeg, settings, fileOk = async () => true, getVideoPaths = () => [], intervalMs = 3 * 60 * 60 * 1000, now = () => Date.now(), onChanged = () => {}, log = () => {} }) {
+function createHealthController({ portal, ffmpeg, settings, fileOk = async () => true, getVideoPaths = () => [], getStreamServers = async () => [], probeServer = null, intervalMs = 3 * 60 * 60 * 1000, now = () => Date.now(), onChanged = () => {}, log = () => {} }) {
   let state = { at: 0, ok: null, checking: false, checks: [] };   // ok:null = never checked yet
   let timer = null;
 
@@ -58,7 +58,21 @@ function createHealthController({ portal, ffmpeg, settings, fileOk = async () =>
                      : { ok: true, detail: paths.length + (paths.length > 1 ? ' videos OK' : ' video OK') };
     });
 
-    const checks = [engine, portalCheck, slate, videos];
+    // The studios' stream servers themselves — probed with the streaming engine,
+    // so a broken secure connection (2.4.7) is caught here, not at air time.
+    const studios = await runOne('studios', 'Studio stream servers', async () => {
+      const list = (await getStreamServers()) || [];
+      const byServer = new Map();
+      for (const it of list) if (it && it.server && !byServer.has(it.server)) byServer.set(it.server, it.label || it.server);
+      if (!byServer.size) return { ok: true, detail: 'no upcoming classes to check' };
+      if (!probeServer) return { ok: true, detail: byServer.size + ' studio(s) — probe unavailable' };
+      const results = await Promise.all([...byServer].map(async ([server, label]) => [label, await probeServer(server)]));
+      const bad = results.filter(([, r]) => !(r && r.ok));
+      if (bad.length) return { ok: false, detail: bad.map(([label, r]) => label + ': ' + ((r && r.detail) || 'cannot be reached')).join(' · ') };
+      return { ok: true, detail: results.length + (results.length > 1 ? ' studios reachable' : ' studio reachable') + (results.every(([, r]) => /secure/.test(r.detail || '')) ? ' (secure)' : '') };
+    });
+
+    const checks = [engine, portalCheck, slate, videos, studios];
     state = { at: now(), ok: checks.every((c) => c.ok), checking: false, checks };
     publish();
     return snapshot();

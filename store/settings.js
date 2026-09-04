@@ -11,7 +11,6 @@ const DEFAULT_SETTINGS = {
   fadeMs: 1000,          // slate→video crossfade length (ms)
   videoBitrate: 6000,    // kbps
   portalEmail: '',
-  portalApiKey: '',
   portalApiBase: '',     // blank ⇒ client uses its built-in default
   launchAtLogin: false,  // Setup toggle → app.setLoginItemSettings (off by default)
 };
@@ -22,7 +21,9 @@ function createSettingsStore({ file }) {
     save(patch) {
       const clean = { ...patch };
       delete clean.password; delete clean.portalPassword;   // never persist a password here
+      delete clean.portalApiKey;                            // …nor the API key (secret store since 2.4.11)
       const merged = { ...DEFAULT_SETTINGS, ...readJson(file, {}), ...clean };
+      delete merged.portalApiKey;                           // scrub a key an older version left on disk
       writeJsonAtomic(file, merged);
       return merged;
     },
@@ -35,7 +36,7 @@ function buildPortalConfig(settings, secrets) {
   return {
     email: settings.portalEmail || '',
     password: secrets.get('portalPassword') || '',
-    apiKey: settings.portalApiKey || '',
+    apiKey: secrets.get('portalApiKey') || settings.portalApiKey || '',   // secret store; legacy settings value until migrated
     apiBase: settings.portalApiBase || '',
   };
 }

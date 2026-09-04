@@ -68,6 +68,51 @@ function ffmpegEnv(opts = {}) {
   return { ...base, SSL_CERT_FILE: ca };
 }
 
+/* Studio stream-server probe — with the SAME engine that will stream.
+
+   The health check used to prove only that the content portal's login worked;
+   the studio ingest itself was never touched, so the 2.4.7 fault (this engine
+   could not verify ANY TLS certificate) stayed invisible until a class died.
+   probeIngest() opens the server as a bare TLS/TCP input with a short read
+   timeout. Nothing is sent, no key is involved. Outcomes were measured on
+   2026-09-04 against Mux: a healthy secure server completes the handshake and
+   then "Operation timed out" waiting for data (that is SUCCESS); a missing CA
+   bundle says "certificate verify failed"; refused/unresolvable hosts say so. */
+function probeTargetFor(server) {
+  const m = /^(rtmps?):\/\/([^/:?#]+)(?::(\d+))?/i.exec(String(server || '').trim());
+  if (!m) return '';
+  const secure = m[1].toLowerCase() === 'rtmps';
+  const port = m[3] || (secure ? '443' : '1935');
+  return (secure ? 'tls://' : 'tcp://') + m[2] + ':' + port;
+}
+function classifyProbe(stderr) {
+  const e = String(stderr || '');
+  if (/certificate verify failed/i.test(e)) return { ok: false, detail: 'secure connection failed — the server’s certificate could not be verified' };
+  if (/Failed to resolve hostname/i.test(e)) return { ok: false, detail: 'cannot be reached — the server name could not be resolved' };
+  if (/Connection refused/i.test(e)) return { ok: false, detail: 'cannot be reached — connection refused' };
+  if (/Connection to \S+ failed/i.test(e)) {
+    const why = (e.match(/failed: ([^\n]+)/) || [])[1] || 'connection failed';
+    return { ok: false, detail: 'cannot be reached — ' + why.trim().toLowerCase() };
+  }
+  if (/Network is unreachable|No route to host/i.test(e)) return { ok: false, detail: 'cannot be reached — no network route' };
+  if (/Operation timed out/i.test(e)) return { ok: true, detail: 'reachable (secure)' };   // connected + handshake done; the server simply sends nothing
+  return { ok: false, detail: 'unexpected response from the server' };
+}
+function probeIngest(server, { timeoutMs = 4000, run } = {}) {
+  const target = probeTargetFor(server);
+  if (!target) return Promise.resolve({ ok: false, detail: 'no stream server address' });
+  const args = ['-nostdin', '-hide_banner', '-loglevel', 'error', '-rw_timeout', String(timeoutMs * 1000),
+    '-i', target + (target.startsWith('tcp://') ? '?timeout=' + (timeoutMs * 1000) : ''), '-t', '0.1', '-f', 'null', '-'];
+  const exec = run || ((a) => new Promise((resolve) => {
+    execFile(ffmpegPath(), a, { timeout: timeoutMs + 6000, env: ffmpegEnv(), windowsHide: true }, (_err, _stdout, stderr) => resolve(String(stderr || '')));
+  }));
+  return Promise.resolve(exec(args)).then((stderr) => {
+    const r = classifyProbe(stderr);
+    if (r.ok && target.startsWith('tcp://')) r.detail = 'reachable';
+    return r;
+  });
+}
+
 function selfCheck() {
   return new Promise((resolve) => {
     execFile(ffmpegPath(), ['-version'], { timeout: 10000 }, (err, stdout) => {
@@ -83,4 +128,4 @@ function selfCheck() {
   });
 }
 
-module.exports = { ffmpegPath, ffprobePath, selfCheck, caFile, ffmpegEnv, resolveTool };
+module.exports = { ffmpegPath, ffprobePath, selfCheck, caFile, ffmpegEnv, resolveTool, probeTargetFor, classifyProbe, probeIngest };

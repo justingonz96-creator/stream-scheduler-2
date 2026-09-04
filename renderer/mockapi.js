@@ -40,6 +40,8 @@ function createMockApi(seed = {}) {
       case 'settings:save': { Object.assign(settings, payload || {}); delete settings.password; delete settings.portalPassword; return { ...settings }; }
       case 'secret:hasPassword': return hasPw;
       case 'secret:setPassword': { hasPw = !!payload; return { ok: true }; }
+      case 'secret:hasApiKey': return false;
+      case 'secret:setApiKey': return { ok: true };
       case 'portal:testLogin': return { ok: true, stations: [{ name: 'Connect', guid: 'g1' }, { name: 'Reflect', guid: 'g2' }] };
       case 'portal:checkLink': {
         const cig = firstGuid(payload);

@@ -10,6 +10,11 @@ function createIpcHandlers({ settings, secrets, portal, scheduler, probe, ffmpeg
     'settings:save': async (patch) => settings.save(patch || {}),
 
     'secret:hasPassword': async () => secrets.has('portalPassword'),
+    'secret:hasApiKey': async () => secrets.has('portalApiKey'),
+    'secret:setApiKey': async (k) => {
+      try { secrets.set('portalApiKey', String(k == null ? '' : k).trim()); return { ok: true }; }
+      catch (e) { return { ok: false, error: (e && e.message) || 'The API key could not be saved.' }; }
+    },
     'secret:setPassword': async (pw) => {
       try { secrets.set('portalPassword', String(pw == null ? '' : pw)); return { ok: true }; }
       catch (e) { return { ok: false, error: (e && e.message) || 'The password could not be saved.' }; }

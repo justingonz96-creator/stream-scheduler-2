@@ -114,6 +114,13 @@ if (process.argv.includes('--selfcheck')) {
     const settings = createSettingsStore({ file: path.join(dir, 'settings.json') });
     const scheduleStore = createScheduleStore({ file: path.join(dir, 'schedule.json') });
     const secrets = createSecretStore({ file: path.join(dir, 'secrets.json'), ...createSafeCodec(safeStorage) });
+    // 2.4.11: the portal API key moved from plaintext settings.json into the
+    // secret store. Migrate a key an older version left behind, then scrub it.
+    try {
+      const legacyKey = settings.get().portalApiKey;
+      if (legacyKey && !secrets.has('portalApiKey')) { secrets.set('portalApiKey', String(legacyKey)); tagLog('app')('portal API key moved into secure storage'); }
+      if (legacyKey) settings.save({});   // save() drops the plaintext copy
+    } catch (e) { tagLog('app')('API key migration failed: ' + ((e && e.message) || e)); }
     const portal = createPortalClient({
       getConfig: () => buildPortalConfig(settings.get(), secrets),
       transport: createTransport(),
@@ -160,9 +167,32 @@ if (process.argv.includes('--selfcheck')) {
       log: tagLog('update'),
     });
     const updates = { getState: () => updateCtl.getState(), install: () => updateCtl.install(), showDownload: () => updateCtl.showDownload() };
+    // Studio stream servers for the health probe: every upcoming class (next 24 h)
+    // resolves to its studio's ingest server via the portal. Only the SERVER is
+    // kept — never the key — and each class is resolved once per session.
+    const serverByEvent = new Map();
+    const getStreamServers = async () => {
+      const soon = Date.now() + 24 * 3600 * 1000;
+      const out = [];
+      for (const ev of scheduler.getEvents()) {
+        if (ev.status !== 'pending' || !ev.contentItemGuid || ev.fireAt > soon) continue;
+        let entry = serverByEvent.get(ev.id);
+        if (!entry) {
+          try {
+            const t = await portal.streamTarget({ contentItemGuid: ev.contentItemGuid, scheduleGuid: ev.scheduleGuid });
+            entry = (t && t.ok && t.server) ? { server: t.server, label: t.stationName || ev.title || ev.fileName } : null;
+          } catch (e) { entry = null; tagLog('health')('stream target for ' + (ev.title || ev.id) + ' failed: ' + ((e && e.message) || e)); }
+          if (entry) serverByEvent.set(ev.id, entry);
+        }
+        if (entry) out.push(entry);
+      }
+      return out;
+    };
     health = createHealthController({
       portal, ffmpeg, settings,
       fileOk: (p) => fileReachable(p),
+      getStreamServers,
+      probeServer: (server) => ffmpeg.probeIngest(server),   // the SAME engine that will stream to it
       getVideoPaths: () => scheduler.mediaPathsForHealth(),   // local copy counts as healthy even if the drive is down
       onChanged: (state) => { if (win && !win.isDestroyed()) win.webContents.send('health:changed', state); },
       log: tagLog('health'),

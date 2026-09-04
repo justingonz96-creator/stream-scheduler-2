@@ -49,7 +49,7 @@ test('handler map covers exactly the expected channels', () => {
   assert.deepEqual(Object.keys(h).sort(), [
     'engine:selfCheck', 'portal:checkLink', 'portal:testLogin', 'probe:file',
     'schedule:add', 'schedule:list', 'schedule:remove', 'schedule:clearPast', 'schedule:stop', 'schedule:retry', 'schedule:skip', 'schedule:update',
-    'secret:hasPassword', 'secret:setPassword', 'settings:get', 'settings:save',
+    'secret:hasPassword', 'secret:setPassword', 'secret:hasApiKey', 'secret:setApiKey', 'settings:get', 'settings:save',
     'update:getState', 'update:install', 'update:showDownload',
     'health:get', 'health:check',
   ].sort());
@@ -144,4 +144,15 @@ test('portal:checkLink keeps the scheduleGuid from the link when it has one', as
   const { h } = handlers({ portal: { testLogin: async () => ({ ok: true }), checkClassLink: async () => ({ ok: true, picked: { scheduleGuid: 'other' }, vertical: false }) } });
   const r = await h['portal:checkLink']('https://content.echelonfit.com/classes/11111111-1111-1111-1111-111111111111?scheduleGuid=22222222-2222-2222-2222-222222222222');
   assert.equal(r.scheduleGuid, '22222222-2222-2222-2222-222222222222');
+});
+
+test('secret:setApiKey stores/clears the key in the secret store; secret:hasApiKey reports it', async () => {
+  const store = {}; const secrets = { has: (k) => !!store[k], set: (k, v) => { store[k] = v; }, get: (k) => store[k] || '' };
+  const { h } = handlers({ secrets });
+  assert.equal(await h['secret:hasApiKey'](), false);
+  assert.deepEqual(await h['secret:setApiKey']('K1'), { ok: true });
+  assert.equal(store.portalApiKey, 'K1');
+  assert.equal(await h['secret:hasApiKey'](), true);
+  await h['secret:setApiKey']('');
+  assert.equal(await h['secret:hasApiKey'](), false, 'blank clears it');
 });
