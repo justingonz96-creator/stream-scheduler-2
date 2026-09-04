@@ -1,0 +1,45 @@
+# Builds the Windows installer ON WINDOWS and attaches it to a GitHub release.
+#
+# Why this exists: a Windows installer built on macOS carries a corrupt
+# uninstaller (electron-builder #4875), which broke every in-app update from
+# 2.4.0 to 2.4.5. Building on a real Windows machine is the only safe way, and
+# this runner is one. Runs automatically when a release is published; can also
+# be started by hand for an existing tag (Actions → windows-installer → Run).
+name: windows-installer
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to build and attach to (e.g. v2.4.8)'
+        required: true
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      TAG: ${{ inputs.tag || github.event.release.tag_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.event.release.tag_name }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Fetch the pinned FFmpeg engine (Windows only)
+        shell: bash
+        run: bash scripts/fetch-ffmpeg.sh --windows-only
+      - name: Build the installer (never auto-publish; we attach explicitly below)
+        run: npm run dist:win -- --publish never
+      - name: Show what was built
+        shell: bash
+        run: ls -la dist/*-win-x64.exe dist/*-win-x64.exe.blockmap dist/latest.yml && grep -m1 '^version' dist/latest.yml
+      - name: Attach to the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" dist/*-win-x64.exe dist/*-win-x64.exe.blockmap dist/latest.yml --clobber

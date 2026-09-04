@@ -32,7 +32,7 @@ SHA_win_x64_ffmpeg="72a489eccd008c2ec2c0a5856c5c75bc3d8bbfa90166c4566865c246445e
 SHA_win_x64_ffprobe="19202b23c0043f15ad1b7bce2344f406fd52bd6efd8f995ce02e7392a1cec52f"
 # ------------------------------------------------------------------------------
 
-sha() { shasum -a 256 "$1" | cut -d' ' -f1; }
+sha() { if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1"; else sha256sum "$1"; fi | cut -d' ' -f1; }   # Git Bash on Windows may lack shasum
 expected() { local v="SHA_$1_$2"; v="${v//-/_}"; echo "${!v}"; }
 
 # ok <platform> <tool> <file>: true when the file is present AND is the pinned build.
@@ -81,6 +81,9 @@ fetch_win() {
   rm -rf "$tmp"
   echo "win-x64: fetched + verified ($FFMPEG_VERSION)"
 }
-fetch_mac
-[ "${1:-}" = "--with-windows" ] && fetch_win
+case "${1:-}" in
+  --windows-only) fetch_win ;;                 # CI Windows runner: no Mac binaries needed
+  --with-windows) fetch_mac; fetch_win ;;
+  *) fetch_mac ;;
+esac
 echo "done"
