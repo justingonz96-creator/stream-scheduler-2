@@ -43,6 +43,7 @@ function createVideoCache({
 
   let queue = Promise.resolve();       // the serial network lane
   const inflight = new Map();          // key → { src, raw, bounded }  (raw = settles when the fs work truly ends)
+  const cancelers = new Map();         // key → () => abort the copy in progress (see cancel)
   const backoff = new Map();           // key → { src, fails, nextAt }
 
   const safeKey = (k) => String(k).replace(/[^A-Za-z0-9_-]/g, '_');
@@ -62,12 +63,13 @@ function createVideoCache({
     return (meta && meta.src === src) ? f : null;   // a copy of a DIFFERENT file under this key is never played
   }
 
-  function copyWithIdleTimeout(src, dest) {
+  function copyWithIdleTimeout(src, dest, key) {
     return new Promise((res, rej) => {
       const rs = openRead(src);
       const ws = fs.createWriteStream(dest);
       let timer = null;
-      const fail = (e) => { clearTimeout(timer); try { rs.destroy(); } catch {} try { ws.destroy(); } catch {} rej(e); };
+      const fail = (e) => { clearTimeout(timer); cancelers.delete(key); try { rs.destroy(); } catch {} try { ws.destroy(); } catch {} rej(e); };
+      cancelers.set(key, () => fail(Object.assign(new Error('cancelled'), { cancelled: true })));
       const arm = () => { clearTimeout(timer); timer = setTimeout(() => fail(new Error('copy stalled — no data for ' + Math.round(copyIdleTimeoutMs / 1000) + 's')), copyIdleTimeoutMs); };
       rs.on('data', arm);
       rs.on('error', fail);
@@ -75,7 +77,7 @@ function createVideoCache({
       // Settle on 'close' (handle released), not 'finish': on Windows an
       // antivirus/indexer can still hold the fresh file at 'finish' and make the
       // rename fail — wasting a multi-GB copy.
-      ws.on('close', () => { clearTimeout(timer); if (ws.writableFinished) res(); else rej(new Error('write stream closed before finishing')); });
+      ws.on('close', () => { clearTimeout(timer); cancelers.delete(key); if (ws.writableFinished) res(); else rej(new Error('write stream closed before finishing')); });
       arm();
       rs.pipe(ws);
     });
@@ -93,6 +95,7 @@ function createVideoCache({
   // The raw work for one (key, src). Awaits the REAL stat — no artificial timeout
   // here, on purpose: this runs on the serial lane, so a hung source blocks only
   // this one lane (one thread) rather than parking a fresh thread every pass.
+  const CANCELLED = Symbol('cancelled');   // a stopped copy is not a failure: no backoff, retry freely
   async function doEnsure(key, src) {
     const f = finalPath(key, src);
     let st;
@@ -129,7 +132,7 @@ function createVideoCache({
     const part = partPath(f);
     rm(part);
     try {
-      await copyWithIdleTimeout(src, part);
+      await copyWithIdleTimeout(src, part, key);
       const got = fs.statSync(part).size;
       if (got !== st.size) throw new Error('short copy: got ' + got + ' of ' + st.size + ' bytes');
       // The source may have been mid-write on the share (the content team still
@@ -144,6 +147,7 @@ function createVideoCache({
       return f;
     } catch (e) {
       rm(part);
+      if (e && e.cancelled) { log('cache: copy of ' + path.basename(src) + ' stopped — the class is playing from the drive now'); return CANCELLED; }
       log('cache: copy failed for ' + path.basename(src) + ': ' + ((e && e.message) || e));
       return null;
     }
@@ -169,17 +173,18 @@ function createVideoCache({
     const cur = inflight.get(key);
     if (cur && cur.src === src) return cur.bounded;
 
-    const raw = queue.then(() => doEnsure(key, src)).catch((e) => { log('cache: unexpected error: ' + ((e && e.message) || e)); return null; });
+    const entry = { src, raw: null, bounded: null, cancelled: false };
+    const raw = queue.then(() => doEnsure(key, src)).then((r) => { if (r === CANCELLED) { entry.cancelled = true; return null; } return r; }, (e) => { log('cache: unexpected error: ' + ((e && e.message) || e)); return null; });
     queue = raw.then(() => {}, () => {});
     let timer = null;
     const bounded = Promise.race([
       raw.then((r) => { clearTimeout(timer); return r; }),
       new Promise((res) => { timer = setTimeout(() => { log('cache: ' + path.basename(src) + ' is not ready yet — timed out waiting for the source (slow or not responding); a class starting now would play from the original location'); res(null); }, statTimeoutMs); }),
     ]);
-    const entry = { src, raw, bounded };
+    entry.raw = raw; entry.bounded = bounded;
     inflight.set(key, entry);
     raw.then((res) => {
-      if (res) backoff.delete(key); else recordFailure(key, src);
+      if (res) backoff.delete(key); else if (!entry.cancelled) recordFailure(key, src);
       if (inflight.get(key) === entry) inflight.delete(key);
     });
     return bounded;
@@ -190,7 +195,12 @@ function createVideoCache({
     return safeReaddir(dir).filter((n) => n.startsWith(prefix)).map((n) => path.join(dir, n));
   }
 
-  function release(key) { for (const p of filesForKey(key)) rm(p); backoff.delete(key); }
+  // Stop a copy in progress for this key (the class just went live from the
+  // drive; a competing full-speed read of the same file would starve it). The
+  // .part is removed by the copy's own cleanup. No-op when nothing is copying.
+  function cancel(key) { const c = cancelers.get(key); if (c) c(); }
+
+  function release(key) { cancel(key); for (const p of filesForKey(key)) rm(p); backoff.delete(key); }
 
   // Orphan cleanup: anything not belonging to a kept key goes. (A kept key's
   // .part is left alone — it may be a copy in progress.)
@@ -202,7 +212,7 @@ function createVideoCache({
     }
   }
 
-  return { ensure, resolve, release, sweep, keyForPath, dir };
+  return { ensure, resolve, release, cancel, sweep, keyForPath, dir };
 }
 
 function rm(p) { try { fs.unlinkSync(p); } catch { /* already gone */ } }

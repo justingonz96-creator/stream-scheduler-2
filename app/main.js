@@ -17,6 +17,7 @@ const { appDataDir, cacheDir } = require('../store/appdata');
 const { createSettingsStore, buildPortalConfig } = require('../store/settings');
 const { createScheduleStore } = require('../store/schedule-store');
 const { createVideoCache } = require('../store/video-cache');
+const { createLogFile } = require('../store/logfile');
 const { createSecretStore } = require('../store/secrets');
 const { createSafeCodec } = require('../store/safe-codec');
 const { createTransport } = require('../portal/http');
@@ -58,27 +59,33 @@ if (process.argv.includes('--selfcheck')) {
     win.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
 
     const dir = appDataDir();
+    // Rolling log next to the data files (logs/app.log + one previous). Every
+    // [tag] line below goes here as well as to the console, so a failure can be
+    // diagnosed from the machine afterwards instead of guessed at.
+    const logFile = createLogFile({ file: path.join(dir, 'logs', 'app.log') });
+    const tagLog = (tag) => (m) => { const line = '[' + tag + '] ' + m; console.log(line); logFile.write(line); };
+    tagLog('app')('Stream Scheduler 2 ' + app.getVersion() + ' starting on ' + process.platform + ' ' + process.arch);
     const settings = createSettingsStore({ file: path.join(dir, 'settings.json') });
     const scheduleStore = createScheduleStore({ file: path.join(dir, 'schedule.json') });
     const secrets = createSecretStore({ file: path.join(dir, 'secrets.json'), ...createSafeCodec(safeStorage) });
     const portal = createPortalClient({
       getConfig: () => buildPortalConfig(settings.get(), secrets),
       transport: createTransport(),
-      log: (m) => console.log('[portal] ' + m),
+      log: tagLog('portal'),
     });
     // Local copies of upcoming classes' videos + the slate files, so a live
     // broadcast never depends on the network drive once it starts.
     // The cache is optional by design: if its folder can't be created (odd
     // permissions), the app must still launch and simply play from the originals.
     let cache = null;
-    try { cache = createVideoCache({ dir: path.join(cacheDir(), 'video-cache'), log: (m) => console.log('[cache] ' + m) }); }
-    catch (e) { console.log('[cache] disabled — could not create the cache folder: ' + ((e && e.message) || e)); }
+    try { cache = createVideoCache({ dir: path.join(cacheDir(), 'video-cache'), log: tagLog('cache') }); }
+    catch (e) { tagLog('cache')('disabled — could not create the cache folder: ' + ((e && e.message) || e)); }
     let idc = 0;
     const buildScheduler = () => createScheduler({
       store: scheduleStore, portal, settings, cache,
       engineFactory: (opts) => new Broadcast(opts),
       genId: () => 'ev' + Date.now() + '-' + (idc++),
-      log: (m) => console.log('[sched] ' + m),
+      log: tagLog('sched'),
     });
     try {
       scheduler = buildScheduler();
@@ -104,7 +111,7 @@ if (process.argv.includes('--selfcheck')) {
     const updateCtl = createUpdateController({
       autoUpdater, scheduler, shell,
       onChanged: (state) => { if (!win.isDestroyed()) win.webContents.send('update:changed', state); },
-      log: (m) => console.log('[update] ' + m),
+      log: tagLog('update'),
     });
     const updates = { getState: () => updateCtl.getState(), install: () => updateCtl.install(), showDownload: () => updateCtl.showDownload() };
     health = createHealthController({
@@ -112,7 +119,7 @@ if (process.argv.includes('--selfcheck')) {
       fileOk: (p) => fileReachable(p),
       getVideoPaths: () => scheduler.mediaPathsForHealth(),   // local copy counts as healthy even if the drive is down
       onChanged: (state) => { if (!win.isDestroyed()) win.webContents.send('health:changed', state); },
-      log: (m) => console.log('[health] ' + m),
+      log: tagLog('health'),
     });
     const handlers = createIpcHandlers({ settings, secrets, portal, scheduler, probe, ffmpeg, updates, health });
     for (const [channel, fn] of Object.entries(handlers)) {

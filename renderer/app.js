@@ -289,6 +289,15 @@ if (typeof document !== 'undefined') {
     const past = events.filter((e) => ['done', 'failed', 'missed'].includes(e.status));
     const live = up.find((e) => ['starting', 'preshow', 'playing'].includes(e.status));
     $('liveBar').className = live ? '' : 'hidden';
+    if (live) {
+      const from = live.playedFrom ? 'Playing from the ' + live.playedFrom + '.' : '';
+      const slow = live.slow && live.slow.speed != null
+        ? ' ⚠ Falling behind — running at ' + Number(live.slow.speed).toFixed(2) + '× real time. Viewers will see stutter and the class will end late. ' +
+          (live.playedFrom === 'drive' ? 'The video is being read from the network drive; that drive is likely too slow.' : 'This computer is not keeping up with the encode.')
+        : '';
+      $('liveSub').textContent = (from + slow).trim();
+      $('liveBar').classList.toggle('slow', !!slow);
+    }
     $('upcomingList').innerHTML = '';
     if (up.length === 0) $('upcomingList').innerHTML = '<div class="sched-empty">Upcoming classes will appear here.</div>';
     else for (const ev of up.sort((a, b) => a.fireAt - b.fireAt)) $('upcomingList').appendChild(row(ev, true));

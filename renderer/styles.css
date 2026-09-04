@@ -201,7 +201,8 @@
   :root[data-theme="dark"] #failAlert #btnFailDismiss { background: rgba(255,255,255,0.10); }
   :root[data-theme="dark"] #failAlert #btnFailDismiss:hover { background: rgba(255,255,255,0.18); }
 
-  /* LIVE bar */
+  /* LIVE bar — .slow = the encoder is falling behind (amber edge, not a new colour) */
+  #liveBar.slow { box-shadow: inset 0 0 0 3px #fbbf24; }
   #liveBar {
     display: flex; margin-top: var(--sp-4); border-radius: 14px; padding: var(--sp-4) var(--sp-5);
     background: linear-gradient(100deg, #dc2626, #b91c1c); color: #fff;

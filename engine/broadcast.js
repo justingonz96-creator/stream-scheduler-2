@@ -7,6 +7,8 @@ const { buildBroadcastArgs, videoStartsAtSec } = require('./timeline');
 
 const VERIFY_AT_SEC = 0.5;      // out_time must pass this to count as "actually playing"
 const STALL_TIMEOUT_MS = 20000; // once playing, this long with NO new video = a frozen encode
+const SLOW_SPEED = 0.9;         // ffmpeg speed= below this = falling behind the clock
+const SLOW_WINDOW_MS = 30000;   // …for this long continuously before we say so
 
 /* One broadcast attempt = one Broadcast instance. start() may be called once; to
    retry a failed start or resume after a crash, create a NEW Broadcast (passing
@@ -81,6 +83,32 @@ class Broadcast extends EventEmitter {
     this._lastSeenOut = 0;      // highest out_time observed so far
     this._lastAdvanceAt = 0;    // monotonic time (via _now) of the last real advance
     this._stallTimer = null;
+    // Encoder speed, from ffmpeg's own speed= lines. Below 1x the stream is
+    // falling behind real time (viewers stutter, the class ends late). A
+    // sustained dip emits 'slow' once; recovery emits 'speedok' and re-arms.
+    this._speed = { last: null, min: null, sum: 0, samples: 0 };
+    this._slowSince = null;
+    this._slowReported = false;
+  }
+
+  speedStats() {
+    const s = this._speed;
+    return { last: s.last, min: s.min, avg: s.samples ? s.sum / s.samples : null, samples: s.samples };
+  }
+
+  _onSpeed(v) {
+    const s = this._speed;
+    s.last = v; s.min = s.min == null ? v : Math.min(s.min, v); s.sum += v; s.samples++;
+    if (!this._playing) return;
+    const windowMs = this.opts.slowWindowMs == null ? SLOW_WINDOW_MS : this.opts.slowWindowMs;
+    const t = this._now();
+    if (v < SLOW_SPEED) {
+      if (this._slowSince == null) this._slowSince = t;
+      if (!this._slowReported && t - this._slowSince >= windowMs) { this._slowReported = true; this.emit('slow', { speed: v }); }
+    } else {
+      this._slowSince = null;
+      if (this._slowReported) { this._slowReported = false; this.emit('speedok', { speed: v }); }
+    }
   }
 
   _fail(reason) {
@@ -147,6 +175,8 @@ class Broadcast extends EventEmitter {
     const lines = this._stdoutBuf.split('\n');
     this._stdoutBuf = lines.pop();                  // keep the trailing partial line for the next chunk
     for (const line of lines) {
+      const sp = /^speed=\s*([0-9.]+)x/.exec(line.trim());
+      if (sp) { this._onSpeed(Number(sp[1])); continue; }
       const m = /^out_time_us=(\d+)/.exec(line.trim());
       if (m) {
         this.outTimeSec = Number(m[1]) / 1e6;

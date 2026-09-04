@@ -104,6 +104,18 @@ function createScheduler({
     persist();
   }
 
+  // Appended to every finished/failed outcome: where the video was read from,
+  // plus the encoder's real speed — but only when it failed to keep up, so a
+  // healthy class stays a clean "Played ✓".
+  function playbackDetail(ev, bc) {
+    let s = ev.playedFrom ? ' · played from the ' + ev.playedFrom : '';
+    const st = bc && typeof bc.speedStats === 'function' ? bc.speedStats() : null;
+    if (st && st.samples && st.min != null && st.min < 0.9) {
+      s += ' · encoder could not keep up: min ' + st.min.toFixed(2) + '×, average ' + st.avg.toFixed(2) + '× of real time';
+    }
+    return s;
+  }
+
   async function endPortal(ev) {
     if (!ev || (!ev.contentItemGuid && !ev.scheduleGuid)) return;   // no class link → nothing to end
     try {
@@ -145,10 +157,21 @@ function createScheduler({
       slateImage: useSlate ? slateImage : '', slateMusic: useSlate ? slateMusic : '',
       resumeOffsetSec, outUrl: joinRtmpUrl(target.server, target.key),
     });
-    active = { eventId: ev.id, broadcast: bc, target, sawPlaying: false, retried, resumeCount, fromCache: videoPath !== ev.filePath };
+    const fromCache = videoPath !== ev.filePath;
+    // Live from the DRIVE (copy not ready): stop this class's own copy at once —
+    // a second full-speed read of the same file over the same drive starves the
+    // broadcast (2026-09-04: a steady two-thirds of real time on a wired i9 PC).
+    if (!fromCache && cache && typeof cache.cancel === 'function') { try { cache.cancel(ev.id); } catch (e) { log('cache cancel error: ' + ((e && e.message) || e)); } }
+    ev.playedFrom = fromCache ? 'local copy' : 'drive';
+    ev.slow = null;
+    active = { eventId: ev.id, broadcast: bc, target, sawPlaying: false, retried, resumeCount, fromCache };
     bc.on('playing', () => { try { onPlaying(ev.id, bc); } catch (e) { log('playing handler error: ' + ((e && e.message) || e)); } });
     bc.on('ended', () => { onEnded(ev.id, bc).catch((e) => log('ended handler error: ' + ((e && e.message) || e))); });
     bc.on('failed', (info) => { onFailed(ev.id, (info && info.reason) || 'unknown', bc).catch((e) => log('failed handler error: ' + ((e && e.message) || e))); });
+    // Encoder falling behind the clock: flag it on the event so the live view
+    // warns while it is happening, and clear it when it recovers.
+    bc.on('slow', (info) => { if (active && active.broadcast === bc) { ev.slow = { speed: info && info.speed, at: now() }; log('encoder running slow: ' + (info && info.speed) + 'x — ' + (ev.title || ev.fileName || ev.id) + ' (' + ev.playedFrom + ')'); persist(); } });
+    bc.on('speedok', () => { if (active && active.broadcast === bc) { ev.slow = null; log('encoder back to real time'); persist(); } });
     try { bc.start(); }
     catch (e) { onFailed(ev.id, (e && e.message) || 'the video engine could not start', bc).catch(() => {}); }
   }
@@ -167,6 +190,8 @@ function createScheduler({
     if (!ev) return;
     if (ev.autoStop) { await endPortal(ev); ev.outcome = 'Played ✓ and the stream ended'; }
     else { ev.outcome = 'Played ✓ — video finished (portal broadcast left open, as requested)'; }
+    ev.outcome += playbackDetail(ev, bc);
+    ev.slow = null;
     ev.status = 'done'; ev.doneAt = now();
     renew(ev); persist();
   }
