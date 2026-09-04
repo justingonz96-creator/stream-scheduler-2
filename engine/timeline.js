@@ -19,7 +19,11 @@ function buildBroadcastArgs(o) {
   const kbps = o.bitrateKbps || 6000;
   const fade = o.fadeSec == null ? 1 : o.fadeSec;
   const [W, H] = canvas(!!o.vertical);
-  const fit = `scale=${W}:${H}:force_original_aspect_ratio=decrease,` +
+  // Colour: convert EVERY input to limited-range bt709 explicitly. The slate
+  // JPEG is full-range (pc) with a bt470bg matrix, and the crossfade output
+  // inherited those tags for the WHOLE class — whose content is tv-range bt709 —
+  // so players could render it washed out or crushed (2026-09-04 audit).
+  const fit = `scale=${W}:${H}:force_original_aspect_ratio=decrease:in_range=auto:out_range=tv:in_color_matrix=auto:out_color_matrix=bt709,` +
               `pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=${fps},format=yuv420p`;
   const afmt = 'aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo';
 
@@ -63,6 +67,7 @@ function buildBroadcastArgs(o) {
   args.push(
     '-filter_complex', filter, '-map', '[vout]', '-map', '[aout]',
     '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p',
+    '-color_range', 'tv', '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709',   // signal what we now produce
     '-b:v', `${kbps}k`, '-maxrate', `${kbps}k`, '-bufsize', `${kbps * 2}k`,
     '-g', String(fps * 2), '-keyint_min', String(fps * 2),
     '-c:a', 'aac', '-b:a', '160k', '-ar', '44100', '-ac', '2',

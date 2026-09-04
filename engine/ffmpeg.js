@@ -9,19 +9,32 @@ const PLATFORM_DIR = process.platform === 'win32' ? 'win-x64'
                    : process.arch === 'arm64' ? 'mac-arm64' : 'mac-x64';
 const EXT = process.platform === 'win32' ? '.exe' : '';
 
-function resolveTool(tool) {
+const canExec = (p) => { try { fs.accessSync(p, fs.constants.X_OK); return true; } catch { return false; } };
+
+function resolveTool(tool, opts = {}) {
+  const resourcesPath = opts.resourcesPath === undefined ? process.resourcesPath : opts.resourcesPath;
+  const platformDir = opts.platformDir || PLATFORM_DIR;
+  const exists = opts.exists || canExec;
+  const log = opts.log || ((m) => console.log('[engine] ' + m));
+  // Packaged app: electron-builder's extraResources puts the binaries at
+  // <resourcesPath>/ffmpeg/<platform>/ — OUTSIDE the asar, so they can execute.
+  // There is deliberately NO fallback here: a system/Homebrew ffmpeg is unpinned
+  // and (on macOS) may not verify TLS, so silently using one would turn a clear
+  // "engine missing" failure into a mysterious broadcast failure (2026-09-04 audit).
+  if (resourcesPath) {
+    const bundled = path.join(resourcesPath, 'ffmpeg', platformDir, tool + EXT);
+    if (!exists(bundled)) log('bundled ' + tool + ' is missing or not executable: ' + bundled);
+    return bundled;
+  }
   const cands = [
-    // Packaged app: electron-builder's extraResources puts the binaries at
-    // <resourcesPath>/ffmpeg/<platform>/ — OUTSIDE the asar, so they can execute.
-    ...(process.resourcesPath ? [path.join(process.resourcesPath, 'ffmpeg', PLATFORM_DIR, tool + EXT)] : []),
-    path.join(__dirname, '..', 'resources', 'ffmpeg', PLATFORM_DIR, tool + EXT),   // dev checkout
+    path.join(__dirname, '..', 'resources', 'ffmpeg', platformDir, tool + EXT),   // dev checkout
     `/opt/homebrew/bin/${tool}`,
     `/usr/local/bin/${tool}`,
-    tool, // PATH fallback
+    tool, // PATH fallback (dev only)
   ];
   for (const c of cands) {
     if (c === tool) return c;
-    try { fs.accessSync(c, fs.constants.X_OK); return c; } catch {}
+    if (exists(c)) return c;
   }
   return tool;
 }
@@ -79,4 +92,4 @@ function selfCheck() {
   });
 }
 
-module.exports = { ffmpegPath, ffprobePath, selfCheck, caFile, ffmpegEnv };
+module.exports = { ffmpegPath, ffprobePath, selfCheck, caFile, ffmpegEnv, resolveTool };

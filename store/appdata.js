@@ -22,4 +22,13 @@ function cacheDir(platform = process.platform, env = process.env) {
   return path.join(env.XDG_CACHE_HOME || path.join(home, '.cache'), 'StreamScheduler2');
 }
 
-module.exports = { appDataDir, cacheDir };
+// Where the rolling log lives: per-machine, never the Windows ROAMING profile
+// (it is synced at logon on domain-joined PCs); macOS's conventional Logs folder.
+function logDir(platform = process.platform, env = process.env) {
+  const home = env.HOME || env.USERPROFILE || '';
+  if (platform === 'darwin') return path.join(home, 'Library', 'Logs', 'StreamScheduler2');
+  if (platform === 'win32') return path.join(env.LOCALAPPDATA || path.join(home, 'AppData', 'Local'), 'StreamScheduler2', 'logs');
+  return path.join(env.XDG_STATE_HOME || path.join(home, '.local', 'state'), 'StreamScheduler2', 'logs');
+}
+
+module.exports = { appDataDir, cacheDir, logDir };

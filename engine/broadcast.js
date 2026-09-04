@@ -62,6 +62,13 @@ function describeFailure(stderrTail) {
   return { kind, message, detail };
 }
 
+// How ffmpeg is spawned. windowsHide: without it a black console window pops up
+// on Windows for every class, and closing it kills the stream (2026-09-04 audit).
+// env carries SSL_CERT_FILE so OpenSSL can verify an rtmps:// studio certificate.
+function spawnOptions() {
+  return { stdio: ['ignore', 'pipe', 'pipe'], env: ffmpeg.ffmpegEnv(), windowsHide: true };
+}
+
 class Broadcast extends EventEmitter {
   constructor(opts) {
     super();
@@ -121,8 +128,7 @@ class Broadcast extends EventEmitter {
     if (this._proc) throw new Error('Broadcast is one-shot: create a new Broadcast to retry or resume.');
 
     const args = buildBroadcastArgs(this.opts);
-    // env carries SSL_CERT_FILE so OpenSSL can verify an rtmps:// studio's certificate.
-    this._proc = spawn(ffmpeg.ffmpegPath(), args, { stdio: ['ignore', 'pipe', 'pipe'], env: ffmpeg.ffmpegEnv() });
+    this._proc = spawn(ffmpeg.ffmpegPath(), args, spawnOptions());
 
     this._proc.on('error', (err) => {
       this._fail('The broadcast could not start — the built-in video engine failed to launch. ' +
@@ -239,4 +245,4 @@ class Broadcast extends EventEmitter {
   }
 }
 
-module.exports = { Broadcast, describeFailure, VERIFY_AT_SEC, STALL_TIMEOUT_MS };
+module.exports = { Broadcast, describeFailure, spawnOptions, VERIFY_AT_SEC, STALL_TIMEOUT_MS };

@@ -13,7 +13,7 @@ function fileReachable(p, timeoutMs = 4000) {
   ]);
 }
 const { app, BrowserWindow, ipcMain, safeStorage, dialog, shell, Menu } = require('electron');
-const { appDataDir, cacheDir } = require('../store/appdata');
+const { appDataDir, cacheDir, logDir } = require('../store/appdata');
 const { createSettingsStore, buildPortalConfig } = require('../store/settings');
 const { createScheduleStore } = require('../store/schedule-store');
 const { createVideoCache } = require('../store/video-cache');
@@ -62,7 +62,7 @@ if (process.argv.includes('--selfcheck')) {
     // Rolling log next to the data files (logs/app.log + one previous). Every
     // [tag] line below goes here as well as to the console, so a failure can be
     // diagnosed from the machine afterwards instead of guessed at.
-    const logFile = createLogFile({ file: path.join(dir, 'logs', 'app.log') });
+    const logFile = createLogFile({ file: path.join(logDir(), 'app.log') });
     const tagLog = (tag) => (m) => { const line = '[' + tag + '] ' + m; console.log(line); logFile.write(line); };
     tagLog('app')('Stream Scheduler 2 ' + app.getVersion() + ' starting on ' + process.platform + ' ' + process.arch);
     const settings = createSettingsStore({ file: path.join(dir, 'settings.json') });
