@@ -24,7 +24,21 @@ function formatReleaseNotes(rn) {
   return '';
 }
 
-function createUpdateController({ autoUpdater, scheduler, shell, onChanged = () => {}, log = () => {} }) {
+const RECHECK_MS = 6 * 3600 * 1000;   // an always-on studio machine must not sit on a broken version for weeks
+
+function createUpdateController({ autoUpdater, scheduler, shell, onChanged = () => {}, log = () => {}, setInterval: setIv = setInterval }) {
+  // Downloads are MANUAL: a multi-hundred-MB download must never compete with a
+  // live class's bandwidth. We start it only when the scheduler says it is safe
+  // (no class live or imminent) and retry on every schedule change (2026-09-04 audit).
+  try { autoUpdater.autoDownload = false; } catch { /* fake updaters in tests */ }
+  let wantDownload = false;
+  function maybeDownload() {
+    if (!wantDownload) return;
+    if (!scheduler.isSafeToUpdate().safe) return;
+    if (typeof autoUpdater.downloadUpdate !== 'function') return;
+    wantDownload = false;
+    Promise.resolve(autoUpdater.downloadUpdate()).catch((e) => log('download failed to start: ' + ((e && e.message) || e)));
+  }
   let state = { phase: 'idle', version: '', error: '', downloadedFile: '', releaseNotes: '' };
   // Set only between install()'s shutdown() and quitAndInstall() actually
   // exiting the process. If quitAndInstall fails instead (it can — e.g. an
@@ -40,7 +54,7 @@ function createUpdateController({ autoUpdater, scheduler, shell, onChanged = () 
   function publish() { onChanged(withGate()); }
 
   autoUpdater.on('checking-for-update', () => { state = { phase: 'checking', version: '', error: '', downloadedFile: '', releaseNotes: '' }; publish(); });
-  autoUpdater.on('update-available', (info) => { state = { phase: 'available', version: (info && info.version) || '', error: '', downloadedFile: '', releaseNotes: formatReleaseNotes(info && info.releaseNotes) }; publish(); });
+  autoUpdater.on('update-available', (info) => { state = { phase: 'available', version: (info && info.version) || '', error: '', downloadedFile: '', releaseNotes: formatReleaseNotes(info && info.releaseNotes) }; wantDownload = true; maybeDownload(); publish(); });
   autoUpdater.on('update-not-available', () => { state = { phase: 'idle', version: '', error: '', downloadedFile: '', releaseNotes: '' }; publish(); });
   autoUpdater.on('download-progress', () => { state = { ...state, phase: 'downloading' }; publish(); });
   // downloadedFile is electron-updater's own cache copy of the installer — it
@@ -58,7 +72,7 @@ function createUpdateController({ autoUpdater, scheduler, shell, onChanged = () 
     publish();
   });
 
-  scheduler.onChanged(() => publish());
+  scheduler.onChanged(() => { maybeDownload(); publish(); });
 
   function getState() { return withGate(); }
 
@@ -78,11 +92,16 @@ function createUpdateController({ autoUpdater, scheduler, shell, onChanged = () 
     catch (e) { return { ok: false, error: (e && e.message) || String(e) }; }
   }
 
-  function start() {
-    autoUpdater.checkForUpdates().catch((e) => {
+  function check() {
+    Promise.resolve(autoUpdater.checkForUpdates()).catch((e) => {
       state = { phase: 'error', version: state.version, error: (e && e.message) || String(e), downloadedFile: state.downloadedFile, releaseNotes: state.releaseNotes };
       publish();
     });
+  }
+  function start() {
+    check();
+    const t = setIv(check, RECHECK_MS);
+    if (t && typeof t.unref === 'function') t.unref();
   }
 
   return { getState, install, showDownload, start };

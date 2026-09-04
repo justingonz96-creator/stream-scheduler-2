@@ -88,4 +88,10 @@ function installMockApi(global) {
 }
 
 if (typeof module !== 'undefined' && module.exports) module.exports = { createMockApi, installMockApi };
-if (typeof window !== 'undefined') { window.MockApi = { createMockApi, installMockApi }; installMockApi(window); }
+// Browser preview only. Inside Electron the real preload provides window.api;
+// if it ever failed, fake always-green data must NOT quietly take its place
+// (2026-09-04 audit) — app.js shows a hard error instead.
+if (typeof window !== 'undefined') {
+  window.MockApi = { createMockApi, installMockApi };
+  if (!/Electron\//.test(navigator.userAgent)) installMockApi(window);
+}

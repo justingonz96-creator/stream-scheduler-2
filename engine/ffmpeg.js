@@ -21,22 +21,13 @@ function resolveTool(tool, opts = {}) {
   // There is deliberately NO fallback here: a system/Homebrew ffmpeg is unpinned
   // and (on macOS) may not verify TLS, so silently using one would turn a clear
   // "engine missing" failure into a mysterious broadcast failure (2026-09-04 audit).
-  if (resourcesPath) {
-    const bundled = path.join(resourcesPath, 'ffmpeg', platformDir, tool + EXT);
-    if (!exists(bundled)) log('bundled ' + tool + ' is missing or not executable: ' + bundled);
-    return bundled;
-  }
-  const cands = [
-    path.join(__dirname, '..', 'resources', 'ffmpeg', platformDir, tool + EXT),   // dev checkout
-    `/opt/homebrew/bin/${tool}`,
-    `/usr/local/bin/${tool}`,
-    tool, // PATH fallback (dev only)
-  ];
-  for (const c of cands) {
-    if (c === tool) return c;
-    if (exists(c)) return c;
-  }
-  return tool;
+  const bundled = resourcesPath ? path.join(resourcesPath, 'ffmpeg', platformDir, tool + EXT) : null;
+  const dev = path.join(__dirname, '..', 'resources', 'ffmpeg', platformDir, tool + EXT);   // a checkout run via `electron .`
+  if (bundled && exists(bundled)) return bundled;
+  if (exists(dev)) return dev;
+  if (bundled) { log('bundled ' + tool + ' is missing or not executable: ' + bundled); return bundled; }   // packaged: fail loudly
+  for (const c of [`/opt/homebrew/bin/${tool}`, `/usr/local/bin/${tool}`]) if (exists(c)) return c;   // dev-only conveniences
+  return tool;   // PATH (dev only)
 }
 
 function ffmpegPath() { return resolveTool('ffmpeg'); }

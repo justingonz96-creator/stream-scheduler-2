@@ -13,6 +13,7 @@ const DEFAULT_SETTINGS = {
   portalEmail: '',
   portalApiKey: '',
   portalApiBase: '',     // blank ⇒ client uses its built-in default
+  launchAtLogin: false,  // Setup toggle → app.setLoginItemSettings (off by default)
 };
 
 function createSettingsStore({ file }) {

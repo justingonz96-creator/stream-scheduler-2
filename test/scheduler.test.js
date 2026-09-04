@@ -318,8 +318,9 @@ test('shutdown() clears the timer and stops a live encode (no orphaned ffmpeg on
   h.setClock(70000); await h.sched.tick();
   h.spawned[0].emit('playing');
   assert.equal(h.spawned[0].stopped, false);
-  h.sched.shutdown();
+  await h.sched.shutdown();   // async since 2026-09-04: it ends the portal broadcast and WAITS for the engine
   assert.equal(h.spawned[0].stopped, true, 'the live broadcast child is stopped on shutdown');
+  assert.equal(h.ended.length, 1, 'the portal is told the broadcast ended');
   h.setClock(80000); await h.sched.tick();
   assert.equal(h.spawned.length, 1, 'shutdown leaves no active broadcast to act on');
 });
@@ -336,7 +337,7 @@ test('updateEvent: edits an upcoming broadcast and persists', () => {
   assert.equal(ev.status, 'pending');
 });
 
-test('updateEvent: refuses the live broadcast, non-pending events, and unknown ids', async () => {
+test('updateEvent: refuses the live broadcast, finished events, and unknown ids — but a MISSED class is editable', async () => {
   const h = harness({ events: [liveEvent({ id: 'L' }), liveEvent({ id: 'D', status: 'done', fireAt: 1 }), liveEvent({ id: 'M', status: 'missed', fireAt: 2 })] });
   h.setClock(70000); await h.sched.tick();
   h.spawned[0].emit('playing');
@@ -344,7 +345,7 @@ test('updateEvent: refuses the live broadcast, non-pending events, and unknown i
   assert.equal(live.ok, false); assert.match(live.error, /stop the live broadcast/i);
   const done = h.sched.updateEvent('D', { title: 'nope' });
   assert.equal(done.ok, false); assert.match(done.error, /only upcoming/i);
-  assert.equal(h.sched.updateEvent('M', { title: 'nope' }).ok, false);
+  assert.equal(h.sched.updateEvent('M', { title: 'late video attached' }).ok, true, 'missed is editable again (2026-09-04 audit: late-video dead end)');
   const gone = h.sched.updateEvent('nosuch', { title: 'nope' });
   assert.equal(gone.ok, false); assert.match(gone.error, /not found/i);
 });

@@ -19,6 +19,10 @@ function buildAddPayload(f) {
 if (typeof document !== 'undefined') {
   const $ = (id) => document.getElementById(id);
   const api = window.api;
+  if (!api) {
+    document.body.innerHTML = '<div style="padding:24px;font:16px system-ui;color:#fff;background:#7f1d1d;">Stream Scheduler could not start its internal connection (the preload bridge is missing). Reinstall the app or contact the admin — nothing here would work.</div>';
+    throw new Error('window.api missing');
+  }
   const F = window.Fmt, FS = window.FormState;
 
   // form working state
@@ -334,7 +338,13 @@ if (typeof document !== 'undefined') {
         acts.appendChild(btn('End stream now', () => api.invoke('schedule:stop', ev.id), 'btn-danger'));
       } else {
         acts.appendChild(btn('Edit', () => openEdit(ev)));
-        acts.appendChild(btn('Remove', () => confirmRemove(ev, acts), 'btn-danger'));
+        if (ev.repeatWeekly) {
+          // A weekly class: skipping one week must not end the series (it used to).
+          acts.appendChild(btn('Skip this week', async () => { const res = await api.invoke('schedule:skip', ev.id); if (!res || !res.ok) alert((res && res.error) || 'That week could not be skipped.'); }));
+          acts.appendChild(btn('Remove series', () => confirmRemove(ev, acts), 'btn-danger'));
+        } else {
+          acts.appendChild(btn('Remove', () => confirmRemove(ev, acts), 'btn-danger'));
+        }
         // Survive a re-render: if this row was mid-"Remove?" before the rebuild,
         // put it straight back into the confirm state.
         if (ev.id === pendingRemoveId) confirmRemove(ev, acts);
@@ -344,6 +354,9 @@ if (typeof document !== 'undefined') {
       // Past events: a quiet Remove to clear a single history entry (low-stakes —
       // it already happened, so no confirm step).
       const acts = document.createElement('div'); acts.className = 'sacts';
+      // A MISSED class is not a dead end any more: attach the (late) video or fix
+      // the time, and it goes back on the schedule and starts as soon as it can.
+      if (ev.status === 'missed') acts.appendChild(btn(ev.needsVideo ? 'Attach video' : 'Edit', () => openEdit(ev)));
       acts.appendChild(btn('Remove', async () => { const res = await api.invoke('schedule:remove', ev.id); if (!res || !res.ok) alert((res && res.error) || 'That broadcast could not be removed.'); }));
       el.appendChild(acts);
     }
@@ -356,7 +369,7 @@ if (typeof document !== 'undefined') {
     pendingRemoveId = ev.id;   // remember, so a re-render restores this confirm
     acts.innerHTML = '';
     const prompt = document.createElement('span'); prompt.className = 'ev-confirm';
-    prompt.appendChild(document.createTextNode('Remove?'));
+    prompt.appendChild(document.createTextNode(ev.repeatWeekly ? 'Remove the whole weekly series?' : 'Remove?'));
     prompt.appendChild(btn('Remove', async () => {
       pendingRemoveId = null;
       const res = await api.invoke('schedule:remove', ev.id);
@@ -445,10 +458,11 @@ if (typeof document !== 'undefined') {
     if (presets.includes(String(s.videoBitrate))) { $('setBitratePreset').value = String(s.videoBitrate); $('setBitrateCustom').style.display = 'none'; }
     else { $('setBitratePreset').value = 'custom'; $('setBitrateCustom').style.display = ''; $('setBitrateCustom').value = s.videoBitrate; }
     $('setPortalEmail').value = s.portalEmail || ''; $('setPortalApiKey').value = s.portalApiKey || '';
+    $('setLaunchAtLogin').checked = !!s.launchAtLogin;
   }
   function chosenBitrate() { const p = $('setBitratePreset').value; return p === 'custom' ? (parseInt($('setBitrateCustom').value, 10) || 6000) : parseInt(p, 10); }
   async function saveSetup() {
-    await api.invoke('settings:save', { slateImage: slatePath('setSlateImage'), slateImageVertical: slatePath('setSlateImageVertical'), slateMusic: slatePath('setSlateMusic'), fadeMs: parseInt($('setFade').value, 10), videoBitrate: chosenBitrate(), portalEmail: $('setPortalEmail').value.trim(), portalApiKey: $('setPortalApiKey').value.trim() });
+    await api.invoke('settings:save', { slateImage: slatePath('setSlateImage'), slateImageVertical: slatePath('setSlateImageVertical'), slateMusic: slatePath('setSlateMusic'), fadeMs: parseInt($('setFade').value, 10), videoBitrate: chosenBitrate(), portalEmail: $('setPortalEmail').value.trim(), portalApiKey: $('setPortalApiKey').value.trim(), launchAtLogin: $('setLaunchAtLogin').checked });
     const pw = $('setPortalPassword').value; if (pw) { await api.invoke('secret:setPassword', pw); $('setPortalPassword').value = ''; }
     hasSlateConfigured = !!(slatePath('setSlateImage') || slatePath('setSlateImageVertical'));
     showView('main');
