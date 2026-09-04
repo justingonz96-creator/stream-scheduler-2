@@ -32,8 +32,10 @@ function createScheduler({
 
   // ----- crash recovery: a live ffmpeg cannot survive an app restart -----
   let recovered = false;
+  const interrupted = [];   // told to the portal on start() — a crash never ended their broadcasts
   for (const ev of events) {
     if (['starting', 'preshow', 'playing'].includes(ev.status)) {
+      interrupted.push(ev);
       ev.status = 'missed';
       ev.outcome = 'Interrupted — the app was closed during the broadcast';
       ev.doneAt = now();
@@ -362,7 +364,10 @@ function createScheduler({
     if (active && active.eventId === id) return { ok: false, error: 'Stop the live broadcast before changing it.' };
     const ev = byId(id);
     if (!ev) return { ok: false, error: 'That broadcast was not found.' };
-    if (ev.status !== 'pending') return { ok: false, error: 'Only upcoming broadcasts can be changed.' };
+    // A MISSED class is editable too: a weekly slot whose video arrived late used
+    // to be a dead end. Attaching the video makes it pending again; the next tick
+    // then starts it late with the usual seek (2026-09-04 audit).
+    if (!['pending', 'missed'].includes(ev.status)) return { ok: false, error: 'Only upcoming (or missed) broadcasts can be changed.' };
     const p = patch || {};
     const next = { ...ev };
     for (const k of EDITABLE) if (p[k] !== undefined) next[k] = p[k];
@@ -374,6 +379,23 @@ function createScheduler({
     persist();
     cachePass();
     return { ok: true, event: { ...ev } };
+  }
+
+  // Skip just this week of a weekly class: create next week's occurrence first,
+  // then drop this one. removeEvent() on a weekly class removes the SERIES — the
+  // UI now offers both explicitly (2026-09-04 audit: "Remove" silently ended series).
+  function skipEvent(id) {
+    if (busy) return { ok: false, error: 'The scheduler is busy — try again in a moment.' };
+    if (active && active.eventId === id) return { ok: false, error: 'Stop the live broadcast before skipping it.' };
+    const ev = byId(id);
+    if (!ev) return { ok: false, error: 'That broadcast was not found.' };
+    if (!ev.repeatWeekly) return { ok: false, error: 'Only a weekly class can be skipped — remove a one-off class instead.' };
+    events = events.filter((e) => e.id !== id);   // drop this week FIRST: renew() treats a still-pending slot as "already renewed"
+    renew(ev);
+    if (cache) cache.release(id);
+    persist();
+    cachePass();
+    return { ok: true };
   }
 
   function removeEvent(id) {
@@ -415,6 +437,12 @@ function createScheduler({
 
   function onChanged(fn) { listeners.add(fn); return () => listeners.delete(fn); }
   function start() {
+    // Crash recovery, part 2: the previous run died mid-broadcast; the portal
+    // still thinks those studios are live. Tell it now (best effort, logged).
+    while (interrupted.length) {
+      const ev = interrupted.shift();
+      if (ev.autoStop) endPortal(ev).catch((e) => log('recovery: portal end failed: ' + ((e && e.message) || e)));
+    }
     if (!timer) timer = setInterval(() => { tick().catch((e) => log('tick error: ' + ((e && e.message) || e))); }, 1000);
     if (cache && !cacheTimer) cacheTimer = setInterval(cachePass, cachePassMs);
   }
@@ -427,11 +455,16 @@ function createScheduler({
   // orphaned (a background process that keeps running after the window closes).
   // Best-effort and synchronous — the app is quitting, so we don't await a
   // portal end here; we just make sure the child dies with us.
-  function shutdown() {
+  // App quit: end the portal broadcast (end-portal-before-stop, like stopActive)
+  // and actually WAIT for the engine to exit, so ffmpeg is never orphaned and the
+  // studio is not left "live" on the platform (2026-09-04 audit).
+  async function shutdown() {
     stop();
     const bc = active && active.broadcast;
+    const ev = active ? byId(active.eventId) : null;
     active = null;
-    try { if (bc) bc.stop(); } catch {}
+    if (ev && ev.autoStop) { try { await endPortal(ev); } catch (e) { log('shutdown: portal end failed: ' + ((e && e.message) || e)); } }
+    try { if (bc) await bc.stop(); } catch { /* already gone */ }
   }
 
   function safeToUpdate() { return isSafeToUpdate(events, now()); }
@@ -443,7 +476,7 @@ function createScheduler({
       .map((e) => (cache && cache.resolve(e.id, e.filePath)) || e.filePath);
   }
 
-  return { tick, start, stop, shutdown, getEvents, addEvent, updateEvent, removeEvent, clearPast, stopActive, retryEvent, onChanged, isSafeToUpdate: safeToUpdate, cachePass, mediaPathsForHealth };
+  return { tick, start, stop, shutdown, getEvents, addEvent, updateEvent, removeEvent, skipEvent, clearPast, stopActive, retryEvent, onChanged, isSafeToUpdate: safeToUpdate, cachePass, mediaPathsForHealth };
 }
 
 module.exports = { createScheduler };

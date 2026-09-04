@@ -18,7 +18,7 @@ test('parsePortalLink: junk → empty', () => {
 });
 
 function handlers(over = {}) {
-  const calls = { save: [], setPw: [], add: [], update: [], remove: [], stop: [], retry: [], check: [] };
+  const calls = { save: [], setPw: [], add: [], update: [], remove: [], stop: [], retry: [], skip: [], check: [] };
   const base = {
     settings: { get: () => ({ videoBitrate: 6000 }), save: (p) => { calls.save.push(p); return { videoBitrate: 6000, ...p }; } },
     secrets: { has: () => true, set: (k, v) => { calls.setPw.push([k, v]); } },
@@ -34,6 +34,7 @@ function handlers(over = {}) {
       clearPast: () => { calls.clearPast = (calls.clearPast || 0) + 1; return { ok: true, removed: 3 }; },
       stopActive: async (id) => { calls.stop.push(id); return { ok: true }; },
       retryEvent: async (id) => { calls.retry.push(id); return { ok: true }; },
+      skipEvent: async (id) => { calls.skip.push(id); return { ok: true }; },
     },
     probe: { probeFile: async (p) => ({ ok: true, durationSec: 10, width: 1920, height: 1080, _p: p }) },
     ffmpeg: { selfCheck: async () => ({ ok: true, version: 'x' }) },
@@ -47,7 +48,7 @@ test('handler map covers exactly the expected channels', () => {
   const { h } = handlers();
   assert.deepEqual(Object.keys(h).sort(), [
     'engine:selfCheck', 'portal:checkLink', 'portal:testLogin', 'probe:file',
-    'schedule:add', 'schedule:list', 'schedule:remove', 'schedule:clearPast', 'schedule:stop', 'schedule:retry', 'schedule:update',
+    'schedule:add', 'schedule:list', 'schedule:remove', 'schedule:clearPast', 'schedule:stop', 'schedule:retry', 'schedule:skip', 'schedule:update',
     'secret:hasPassword', 'secret:setPassword', 'settings:get', 'settings:save',
     'update:getState', 'update:install', 'update:showDownload',
     'health:get', 'health:check',
@@ -89,6 +90,7 @@ test('schedule + probe + selfCheck handlers delegate correctly', async () => {
   assert.deepEqual(await h['schedule:clearPast'](), { ok: true, removed: 3 }); assert.equal(calls.clearPast, 1);
   await h['schedule:stop']('e1'); assert.equal(calls.stop[0], 'e1');
   assert.deepEqual(await h['schedule:retry']('e1'), { ok: true });
+  assert.deepEqual(await h['schedule:skip']('e1'), { ok: true }); assert.equal(calls.skip[0], 'e1');
   assert.equal(calls.retry[0], 'e1');
   assert.equal((await h['probe:file']('/v.mp4')).durationSec, 10);
   assert.equal((await h['engine:selfCheck']()).ok, true);
@@ -128,4 +130,18 @@ test('update:showDownload delegates to the injected updates object', async () =>
   const r = await h['update:showDownload']();
   assert.equal(calls.length, 1);
   assert.equal(r.ok, true);
+});
+
+// 2026-09-04 audit: the confirmed occurrence's scheduleGuid was discarded when
+// the pasted link carried none, so the app could re-pick a different studio at
+// air time.
+test('portal:checkLink returns the PICKED occurrence scheduleGuid when the link has none', async () => {
+  const { h } = handlers({ portal: { testLogin: async () => ({ ok: true }), checkClassLink: async () => ({ ok: true, picked: { scheduleGuid: 'sched-picked', stationName: 'Studio 2' }, vertical: false }) } });
+  const r = await h['portal:checkLink']('https://content.echelonfit.com/classes/11111111-1111-1111-1111-111111111111');
+  assert.equal(r.scheduleGuid, 'sched-picked');
+});
+test('portal:checkLink keeps the scheduleGuid from the link when it has one', async () => {
+  const { h } = handlers({ portal: { testLogin: async () => ({ ok: true }), checkClassLink: async () => ({ ok: true, picked: { scheduleGuid: 'other' }, vertical: false }) } });
+  const r = await h['portal:checkLink']('https://content.echelonfit.com/classes/11111111-1111-1111-1111-111111111111?scheduleGuid=22222222-2222-2222-2222-222222222222');
+  assert.equal(r.scheduleGuid, '22222222-2222-2222-2222-222222222222');
 });

@@ -22,6 +22,7 @@ test('every video chain converts to tv-range bt709 explicitly (scale out_range/o
       assert.match(s, /out_range=tv/, 'range must be limited (tv): ' + s);
       assert.match(s, /out_color_matrix=bt709/, 'matrix must be bt709: ' + s);
     }
+    assert.match(f, /setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709/, 'frames must carry primaries+transfer too (x264 writes VUI from frames): ' + f);
   }
 });
 test('the encoder is told the colour signalling too (VUI), so players read tv/bt709', () => {

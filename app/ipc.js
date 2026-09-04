@@ -19,7 +19,11 @@ function createIpcHandlers({ settings, secrets, portal, scheduler, probe, ffmpeg
     'portal:checkLink': async (link) => {
       const ids = parsePortalLink(typeof link === 'string' ? link : (link && link.url) || '');
       const res = await portal.checkClassLink(ids);
-      return { ...res, contentItemGuid: ids.contentItemGuid, scheduleGuid: ids.scheduleGuid };
+      // The occurrence the operator just CONFIRMED is the one that must be saved —
+      // when the link carries no scheduleGuid, keep the picked one, or the app
+      // re-guesses at air time and can stream to a different studio (2026-09-04 audit).
+      const picked = res && res.ok && res.picked && res.picked.scheduleGuid;
+      return { ...res, contentItemGuid: ids.contentItemGuid, scheduleGuid: ids.scheduleGuid || picked || '' };
     },
 
     'probe:file': async (filePath) => probe.probeFile(String(filePath || '')),
@@ -33,6 +37,8 @@ function createIpcHandlers({ settings, secrets, portal, scheduler, probe, ffmpeg
     'schedule:stop': async (id) => scheduler.stopActive(String(id || '')),
     // Operator-driven re-run of a class that did not air (the alert's "Try again").
     'schedule:retry': async (id) => scheduler.retryEvent(String(id || '')),
+    // Skip one week of a weekly class (next week is created first); Remove = the series.
+    'schedule:skip': async (id) => scheduler.skipEvent(String(id || '')),
 
     // getState is synchronous main-process state (electron-updater's own event
     // state + a fresh scheduler.isSafeToUpdate() check) — install re-validates

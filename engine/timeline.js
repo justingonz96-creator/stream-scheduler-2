@@ -24,7 +24,10 @@ function buildBroadcastArgs(o) {
   // inherited those tags for the WHOLE class — whose content is tv-range bt709 —
   // so players could render it washed out or crushed (2026-09-04 audit).
   const fit = `scale=${W}:${H}:force_original_aspect_ratio=decrease:in_range=auto:out_range=tv:in_color_matrix=auto:out_color_matrix=bt709,` +
-              `pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=${fps},format=yuv420p`;
+              `pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=${fps},` +
+              // stamp the full set on the FRAMES: libx264 writes its VUI from frame
+              // properties, so -color_primaries/-color_trc alone left them "unspecified"
+              `setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709,format=yuv420p`;
   const afmt = 'aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo';
 
   const args = ['-nostdin', '-hide_banner', '-loglevel', 'error', '-progress', 'pipe:1'];
